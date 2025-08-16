@@ -238,6 +238,105 @@ const Popup: React.FC = () => {
     chrome.runtime.openOptionsPage();
   };
 
+  const openSidebar = async () => {
+    try {
+      // Get the current active tab
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      if (!tab.id) {
+        setMessage('No active tab found. Please refresh and try again.');
+        setTimeout(() => setMessage(''), 3000);
+        return;
+      }
+      
+      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+        setMessage('Cannot open sidebar on this page. Please navigate to a regular webpage.');
+        setTimeout(() => setMessage(''), 5000);
+        return;
+      }
+      
+      console.log('LearnSphere Popup: Attempting to open sidebar on tab:', tab.id, 'URL:', tab.url);
+      
+      // Always inject content script to ensure it's loaded
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js']
+        });
+        console.log('LearnSphere Popup: Content script injected successfully');
+        
+        // Also inject CSS
+        try {
+          await chrome.scripting.insertCSS({
+            target: { tabId: tab.id },
+            files: ['content.css']
+          });
+          console.log('LearnSphere Popup: CSS injected successfully');
+        } catch (cssError) {
+          console.log('LearnSphere Popup: CSS injection failed (may already be loaded):', cssError);
+        }
+        
+      } catch (injectionError) {
+        console.log('LearnSphere Popup: Content script may already be loaded:', injectionError);
+      }
+      
+      // Wait for content script to initialize and set up message listeners
+      console.log('LearnSphere Popup: Waiting for content script to initialize...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Now try to send the message with retry logic
+      let retryCount = 0;
+      const maxRetries = 3;
+      let response = null;
+      
+      while (retryCount < maxRetries && !response) {
+        try {
+          console.log(`LearnSphere Popup: Attempt ${retryCount + 1} to send message...`);
+          response = await chrome.tabs.sendMessage(tab.id, { 
+            action: 'openChatSidebar'
+          });
+          console.log('LearnSphere Popup: Sidebar response received:', response);
+          break;
+        } catch (messageError) {
+          retryCount++;
+          console.log(`LearnSphere Popup: Message attempt ${retryCount} failed:`, messageError);
+          
+          if (retryCount < maxRetries) {
+            console.log('LearnSphere Popup: Retrying in 500ms...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+      }
+      
+      if (response && response.success) {
+        setMessage('✅ Sidebar opened successfully!');
+        setTimeout(() => {
+          setMessage('');
+          window.close(); // Close popup after success
+        }, 1500);
+      } else {
+        setMessage('Sidebar opened but may not be fully functional. Check the page for the sidebar.');
+        setTimeout(() => setMessage(''), 3000);
+      }
+      
+    } catch (error) {
+      console.error('LearnSphere Popup: Error opening sidebar:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      if (errorMessage.includes('Could not establish connection')) {
+        setMessage('❌ Content script not loaded. Try refreshing the page or use "Inject Content Script" button.');
+        setTimeout(() => setMessage(''), 5000);
+      } else if (errorMessage.includes('Receiving end does not exist')) {
+        setMessage('❌ Content script not responding. Use "Inject Content Script" button to fix this.');
+        setTimeout(() => setMessage(''), 5000);
+      } else {
+        setMessage(`❌ Failed to open sidebar: ${errorMessage}`);
+        setTimeout(() => setMessage(''), 5000);
+      }
+    }
+  };
+
   const debugStorage = async () => {
     console.log('LearnSphere Popup: Debugging storage...');
     try {
@@ -381,9 +480,14 @@ const Popup: React.FC = () => {
             Refresh Status
           </button>
           {apiKeyWorking && (
-            <button onClick={activateExtension} className="activate-button">
-              Activate Extension
-            </button>
+            <>
+              <button onClick={activateExtension} className="activate-button">
+                Activate Extension
+              </button>
+              <button onClick={openSidebar} className="primary-button">
+                🚀 Open LearnSphere Sidebar
+              </button>
+            </>
           )}
           <button onClick={debugStorage} className="debug-button">
             Debug Storage

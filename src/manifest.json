@@ -1,55 +1,39 @@
 {
   "manifest_version": 3,
-  "name": "LearnSphere: The Interactive PDF Scholar",
+  "name": "LearnSphere",
   "version": "1.0.0",
-  "description": "Transform static PDF documents into dynamic, interactive learning environments with AI-powered assistance.",
+  "description": "AI-Powered PDF Learning Assistant with Chat, Summary, and Quiz Generation",
   "permissions": [
-    "storage",
     "activeTab",
-    "scripting",
-    "tabs",
-    "contextMenus"
+    "storage",
+    "contextMenus",
+    "scripting"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*",
-    "file://*/*",
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://*/*.pdf",
-        "file://*/*.pdf",
-        "https://*/*.PDF",
-        "file://*/*.PDF",
-        "file://*/*",
-        "https://*/*",
-        "http://*/*"
-      ],
-      "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "popup.js", "popup.css"],
+      "matches": ["<all_urls>"]
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "LearnSphere"
+    "default_title": "LearnSphere - AI Learning Assistant"
   },
-  "options_page": "options.html",
-  "web_accessible_resources": [
-    {
-      "resources": ["sidebar.html", "sidebar.js", "sidebar.css"],
-      "matches": ["<all_urls>"]
-    }
-  ],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }

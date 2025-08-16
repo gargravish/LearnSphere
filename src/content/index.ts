@@ -1,786 +1,439 @@
-import './content.css';
-import { PDFViewerService } from '../services/PDFViewerService';
-import { SettingsService } from '../services/SettingsService';
-import { TextSelection, AreaSelection } from '../types';
+console.log('🚀 LearnSphere: Content script initializing...');
 
-// Immediate verification that content script is loading
-console.log('🚀 LearnSphere: Content script file loaded successfully!');
-console.log('🚀 LearnSphere: Current URL:', window.location.href);
-console.log('🚀 LearnSphere: Document ready state:', document.readyState);
+// Minimal Gemini integration (no external imports)
+let geminiApiKey: string | null = null;
+const GEMINI_MODEL = 'gemini-1.5-flash';
 
-class LearnSphereContent {
-  private sidebar: HTMLDivElement | null = null;
-  private pdfViewerService!: PDFViewerService;
-  private settingsService!: SettingsService;
-  private isExtensionActive: boolean = false;
-  private lastMouseDownPosition: { x: number; y: number } | null = null;
-
-  constructor() {
-    console.log('LearnSphere: Content script constructor called');
-    console.log('LearnSphere: Current URL:', window.location.href);
-    console.log('LearnSphere: Document ready state:', document.readyState);
-    
-    // Always initialize services and add manual activation button
-    this.pdfViewerService = new PDFViewerService();
-    this.settingsService = SettingsService.getInstance();
-    
-    // Always add a manual activation button for debugging
-    this.addManualActivationButton();
-    
-    // Initialize immediately if DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        console.log('LearnSphere: DOMContentLoaded, initializing...');
-        this.init();
-      });
-    } else {
-      console.log('LearnSphere: DOM already ready, initializing...');
-      this.init();
-    }
-    
-    // Also try to initialize after a short delay to ensure everything is loaded
-    setTimeout(() => {
-      console.log('LearnSphere: Delayed initialization (1s)...');
-      this.init();
-    }, 1000);
-    
-    // And after a longer delay for slow-loading PDFs
-    setTimeout(() => {
-      console.log('LearnSphere: Final delayed initialization (3s)...');
-      this.init();
-    }, 3000);
-    
-    // Listen for window load event
-    window.addEventListener('load', () => {
-      console.log('LearnSphere: Window loaded, initializing...');
-      this.init();
-    });
-  }
-
-  private addManualActivationButton() {
-    // Wait for DOM to be ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.createManualButton());
-    } else {
-      this.createManualButton();
-    }
-  }
-
-  private createManualButton() {
-    const existingButton = document.getElementById('learnsphere-manual-activate');
-    if (existingButton) return;
-
-    const button = document.createElement('div');
-    button.id = 'learnsphere-manual-activate';
-    button.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-      color: white;
-      padding: 12px 20px;
-      border-radius: 25px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      z-index: 10003;
-      box-shadow: 0 4px 16px rgba(255, 107, 107, 0.4);
-      border: 2px solid #ffffff;
-      user-select: none;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-    button.innerHTML = '🚀 Activate LearnSphere';
-    
-    button.addEventListener('click', () => {
-      console.log('LearnSphere: Manual activation button clicked');
-      this.manualActivate();
-    });
-    
-    document.body.appendChild(button);
-    console.log('LearnSphere: Manual activation button added');
-    
-    // Remove button after 30 seconds
-    setTimeout(() => {
-      if (button.parentNode) {
-        button.parentNode.removeChild(button);
-        console.log('LearnSphere: Manual activation button removed');
-      }
-    }, 30000);
-  }
-
-  private async init() {
-    console.log('LearnSphere: Init method called');
-
-    try {
-      // Check if we're on a PDF page
-      const isPDF = this.isPDFPage();
-      console.log('LearnSphere: Is PDF page:', isPDF);
-
-      if (isPDF) {
-        console.log('LearnSphere: PDF page detected, setting up PDF-specific features...');
-
-        // Initialize PDF-specific features
-        await this.initializeSettings();
-        this.setupMessageListener();
-
-        // Check if extension should be active
-        await this.checkExistingExtensionState();
-
-        console.log('LearnSphere: PDF initialization complete');
-      } else {
-        console.log('LearnSphere: Not a PDF page, setting up basic features...');
-
-        // Initialize basic features for non-PDF pages
-        this.setupMessageListener();
-
-        console.log('LearnSphere: Basic initialization complete');
-      }
-
-      // Always show the manual activation button
-      this.createManualButton();
-
-    } catch (error) {
-      console.error('LearnSphere: Error during initialization:', error);
-    }
-  }
-
-  private initializeSettings() {
-    // Apply current settings to the page
-    this.settingsService.applySettingsToPage();
-    
-    // Check if extension should already be active (e.g., if API key exists and is valid)
-    this.checkExistingExtensionState();
-    
-    // Listen for settings changes
-    this.settingsService.addChangeListener((settings) => {
-      console.log('LearnSphere: Settings updated, applying to page');
-      this.settingsService.applySettingsToPage();
-    });
-  }
-
-  private async checkExistingExtensionState() {
-    try {
-      const apiKey = this.settingsService.getGeminiApiKey();
-      if (apiKey && this.settingsService.validateApiKey(apiKey)) {
-        // Test the API key to see if it's working
-        const testResult = await this.settingsService.testApiKey(apiKey);
-        if (testResult.valid) {
-          // Extension should be active, activate it
-          this.isExtensionActive = true;
-          this.enableTextSelection();
-          console.log('LearnSphere: Extension automatically activated on page load');
-        }
-      }
-    } catch (error) {
-      console.log('LearnSphere: Could not check existing extension state:', error);
-    }
-  }
-
-  private isPDFPage(): boolean {
-    const url = window.location.href.toLowerCase();
-    const contentType = document.contentType || '';
-    const hasPDFElements = !!(
-      document.querySelector('embed[type="application/pdf"]') ||
-      document.querySelector('object[type="application/pdf"]') ||
-      document.querySelector('iframe[src*=".pdf"]') ||
-      document.querySelector('canvas[data-pdf-url]')
-    );
-    
-    // Check for PDF in various ways
-    const isPDF = 
-      url.includes('.pdf') || 
-      url.includes('application/pdf') ||
-      contentType.includes('pdf') ||
-      hasPDFElements ||
-      document.title.toLowerCase().includes('pdf') ||
-      window.location.pathname.toLowerCase().includes('.pdf');
-    
-    console.log('LearnSphere: PDF detection details:');
-    console.log('  - URL:', url);
-    console.log('  - Content type:', contentType);
-    console.log('  - Has PDF elements:', hasPDFElements);
-    console.log('  - Document title:', document.title);
-    console.log('  - Pathname:', window.location.pathname);
-    console.log('  - Is PDF page:', isPDF);
-    
-    return isPDF;
-  }
-
-  private async setupPDFViewer() {
-    // Use the PDF viewer service to handle all PDF viewing scenarios
-    await this.pdfViewerService.overrideChromePDFViewer();
-  }
-
-  // Selection methods are now handled by the PDFViewerService
-
-  private openSidebar(selection?: TextSelection | AreaSelection, mode?: string) {
-    if (!this.sidebar) {
-      this.createSidebar();
-    }
-    
-    if (selection) {
-      // Pass selection context to sidebar
-      this.sidebar!.dataset.selection = JSON.stringify(selection);
-    }
-    
-    if (mode) {
-      // Pass mode to sidebar
-      this.sidebar!.dataset.mode = mode;
-    }
-    
-    this.sidebar!.style.right = '0';
-  }
-
-  private createSidebar() {
-    this.sidebar = document.createElement('div');
-    this.sidebar.id = 'learnsphere-sidebar';
-    this.sidebar.style.cssText = `
-      position: fixed;
-      top: 0;
-      right: -400px;
-      width: 400px;
-      height: 100vh;
-      background: white;
-      border-left: 1px solid #e0e0e0;
-      z-index: 10000;
-      transition: right 0.3s ease;
-      box-shadow: -2px 0 8px rgba(0,0,0,0.1);
-    `;
-
-    const header = document.createElement('div');
-    header.style.cssText = `
-      padding: 16px;
-      border-bottom: 1px solid #e0e0e0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    `;
-    
-    const title = document.createElement('h2');
-    title.textContent = 'LearnSphere Chat';
-    title.style.margin = '0';
-    
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '×';
-    closeBtn.style.cssText = `
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #666;
-    `;
-    closeBtn.addEventListener('click', () => {
-      this.sidebar!.style.right = '-400px';
-    });
-
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    this.sidebar.appendChild(header);
-
-    const chatContainer = document.createElement('div');
-    chatContainer.id = 'learnsphere-chat';
-    chatContainer.style.cssText = `
-      flex: 1;
-      padding: 16px;
-      overflow-y: auto;
-    `;
-    this.sidebar.appendChild(chatContainer);
-
-    document.body.appendChild(this.sidebar);
-  }
-
-  // PDF processing is now handled by the PDFViewerService
-
-  private setupMessageListener() {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('🚀 LearnSphere: Content script received message:', message);
-      
-      switch (message.action) {
-        case 'ping':
-          console.log('🚀 LearnSphere: Ping received, responding...');
-          sendResponse({ success: true, message: 'Content script is ready!' });
-          break;
-          
-        case 'showNotification':
-          console.log('🚀 LearnSphere: Showing notification:', message.message);
-          this.showNotification(message.message, 'success');
-          sendResponse({ success: true });
-          break;
-          
-        case 'activateExtension':
-          console.log('🚀 LearnSphere: Activating extension with API key');
-          this.activateExtension(message.apiKey);
-          sendResponse({ success: true });
-          break;
-          
-        case 'showReadyMessage':
-          console.log('🚀 LearnSphere: Showing ready message:', message.message);
-          this.showReadyMessage(message.message);
-          sendResponse({ success: true });
-          break;
-          
-        case 'checkExtensionStatus':
-          console.log('🚀 LearnSphere: Checking extension status');
-          sendResponse({ active: this.isExtensionActive });
-          break;
-          
-        case 'contextMenuAction':
-          console.log('🚀 LearnSphere: Handling context menu action:', message.type);
-          this.handleContextMenuAction(message);
-          sendResponse({ success: true });
-          break;
-          
-        default:
-          console.log('🚀 LearnSphere: Unknown message action:', message.action);
-          sendResponse({ success: false, error: 'Unknown action' });
-      }
-    });
-  }
-
-  private handleContextMenuAction(message: any) {
-    const { type, text } = message;
-    
-    switch (type) {
-      case 'chat':
-        this.openSidebar({
-          text: text,
-          pageNumber: 1,
-          coordinates: { x: 0, y: 0, width: 0, height: 0 }
-        });
-        break;
-
-      case 'summarize':
-        this.openSidebar({
-          text: text,
-          pageNumber: 1,
-          coordinates: { x: 0, y: 0, width: 0, height: 0 }
-        }, 'summarize');
-        break;
-
-      case 'quiz':
-        this.openSidebar({
-          text: text,
-          pageNumber: 1,
-          coordinates: { x: 0, y: 0, width: 0, height: 0 }
-        }, 'quiz');
-        break;
-
-      case 'explain':
-        this.openSidebar({
-          text: text,
-          pageNumber: 1,
-          coordinates: { x: 0, y: 0, width: 0, height: 0 }
-        }, 'explain');
-        break;
-
-      case 'pageSummary':
-        this.getPageText().then(pageText => {
-          this.openSidebar({
-            text: pageText,
-            pageNumber: 1,
-            coordinates: { x: 0, y: 0, width: 0, height: 0 }
-          }, 'pageSummary');
-        });
-        break;
-
-      case 'pageQuiz':
-        this.getPageText().then(pageText => {
-          this.openSidebar({
-            text: pageText,
-            pageNumber: 1,
-            coordinates: { x: 0, y: 0, width: 0, height: 0 }
-          }, 'pageQuiz');
-        });
-        break;
-
-      default:
-        console.error('LearnSphere: Unknown context menu action type:', type);
-    }
-  }
-
-  private async getPageText(): Promise<string> {
-    // Extract text from the current page
-    const textElements = document.querySelectorAll('p, div, span, h1, h2, h3, h4, h5, h6');
-    let pageText = '';
-    
-    textElements.forEach(element => {
-      const text = element.textContent?.trim();
-      if (text && text.length > 10) { // Only include substantial text
-        pageText += text + '\n\n';
-      }
-    });
-    
-    return pageText.trim() || 'No text content found on this page.';
-  }
-
-  private async generateSummary() {
-    const currentDocument = this.pdfViewerService.getCurrentDocument();
-    if (!currentDocument) {
-      console.error('No document loaded');
-      return;
-    }
-
-    // TODO: Implement summary generation
-    console.log('Generating summary for document:', currentDocument.title);
-  }
-
-  private async generateQuiz() {
-    const currentDocument = this.pdfViewerService.getCurrentDocument();
-    if (!currentDocument) {
-      console.error('No document loaded');
-      return;
-    }
-
-    // TODO: Implement quiz generation
-    console.log('Generating quiz for document:', currentDocument.title);
-  }
-
-  private activateExtension(apiKey: string) {
-    console.log('LearnSphere: Extension activated with API key');
-    
-    // Store the API key for use in the content script
-    this.settingsService.setGeminiApiKey(apiKey);
-    
-    // Mark extension as active
-    this.isExtensionActive = true;
-    
-    // Show a visual indicator that the extension is active
-    this.showExtensionActiveIndicator();
-    
-    // Enable text selection and highlighting
-    this.enableTextSelection();
-    
-    // Send response back to popup
-    return { success: true, message: 'Extension activated successfully' };
-  }
-
-  private showReadyMessage(message: string) {
-    // Show a temporary notification that the extension is ready
-    this.showNotification(message, 'success');
-  }
-
-  private showExtensionActiveIndicator() {
-    // Create a more prominent indicator that the extension is active
-    const indicator = document.createElement('div');
-    indicator.id = 'learnsphere-active-indicator';
-    indicator.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: linear-gradient(135deg, #4caf50, #45a049);
-      color: white;
-      padding: 12px 20px;
-      border-radius: 25px;
-      font-size: 14px;
-      font-weight: 600;
-      z-index: 10001;
-      box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
-      animation: slideIn 0.5s ease;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    `;
-    indicator.innerHTML = `
-      <span style="font-size: 18px;">🚀</span>
-      <span>LearnSphere Active</span>
-      <span style="font-size: 12px; opacity: 0.8;">Ready to use!</span>
-    `;
-    
-    // Add CSS animation
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-      }
-    `;
-    document.head.appendChild(style);
-    
-    document.body.appendChild(indicator);
-    
-    // Add a test button to manually test text selection
-    const testButton = document.createElement('button');
-    testButton.textContent = '🧪 Test Text Selection';
-    testButton.style.cssText = `
-      position: fixed;
-      top: 80px;
-      right: 20px;
-      background: #ff9800;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 12px;
-      cursor: pointer;
-      z-index: 10001;
-      box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
-    `;
-    
-    testButton.addEventListener('click', () => {
-      console.log('LearnSphere: Test button clicked, checking text selection...');
-      this.checkForTextSelection();
-      
-      // Show a test message instead of creating a fake selection
-      this.showNotification('Test button clicked! Try selecting some text in the PDF.');
-    });
-    
-    document.body.appendChild(testButton);
-    
-    // Remove indicator after 5 seconds
-    setTimeout(() => {
-      if (indicator.parentNode) {
-        indicator.style.animation = 'slideOut 0.5s ease';
-        indicator.style.transform = 'translateX(100%)';
-        indicator.style.opacity = '0';
-        setTimeout(() => {
-          if (indicator.parentNode) {
-            indicator.parentNode.removeChild(indicator);
-          }
-        }, 500);
-      }
-      
-      // Remove test button after indicator is gone
-      if (testButton.parentNode) {
-        testButton.parentNode.removeChild(testButton);
-      }
-    }, 5000);
-    
-    // Add slideOut animation
-    const slideOutStyle = document.createElement('style');
-    slideOutStyle.textContent = `
-      @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(100%); opacity: 0; }
-      }
-    `;
-    document.head.appendChild(slideOutStyle);
-  }
-
-  private showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
-    const notification = document.createElement('div');
-    notification.id = 'learnsphere-notification';
-    notification.style.cssText = `
-      position: fixed;
-      top: 80px;
-      right: 20px;
-      background: ${type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#2196f3'};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 6px;
-      font-size: 14px;
-      max-width: 300px;
-      z-index: 10001;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      animation: slideIn 0.3s ease;
-    `;
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    // Remove notification after 5 seconds
-    setTimeout(() => {
-      if (notification.parentNode) {
-        notification.parentNode.removeChild(notification);
-      }
-    }, 5000);
-  }
-
-  private enableTextSelection() {
-    console.log('LearnSphere: Enabling text selection...');
-    
-    // Remove any existing listeners first
-    document.removeEventListener('mouseup', this.handleTextSelection.bind(this));
-    document.removeEventListener('keyup', this.handleTextSelection.bind(this));
-    document.removeEventListener('selectionchange', this.handleSelectionChange.bind(this));
-    
-    // Add multiple event listeners for better coverage
-    document.addEventListener('mouseup', this.handleTextSelection.bind(this), true);
-    document.addEventListener('keyup', this.handleTextSelection.bind(this), true);
-    document.addEventListener('selectionchange', this.handleSelectionChange.bind(this), true);
-    
-    // Also listen for mouse events that might indicate text selection
-    document.addEventListener('mousedown', this.handleMouseDown.bind(this), true);
-    
-    console.log('LearnSphere: Text selection events bound successfully');
-  }
-
-  private handleMouseDown(event: MouseEvent) {
-    // Store the mouse down position for potential text selection
-    this.lastMouseDownPosition = { x: event.clientX, y: event.clientY };
-  }
-
-  private handleTextSelection(event: Event) {
-    console.log('LearnSphere: Text selection event triggered:', event.type);
-    this.checkForTextSelection();
-  }
-
-  private handleSelectionChange(event: Event) {
-    console.log('LearnSphere: Selection change event triggered');
-    this.checkForTextSelection();
-  }
-
-  private checkForTextSelection() {
-    const selection = window.getSelection();
-    console.log('LearnSphere: Checking for text selection...');
-    console.log('LearnSphere: Selection object:', selection);
-    
-    if (selection) {
-      console.log('LearnSphere: Selection range count:', selection.rangeCount);
-      console.log('LearnSphere: Selection text:', selection.toString());
-      
-      if (selection.rangeCount > 0 && selection.toString().trim().length > 0) {
-        console.log('LearnSphere: Valid text selection found, showing button...');
-        this.showSelectionActionButton(selection);
-      } else {
-        console.log('LearnSphere: No valid text selection found');
-      }
-    } else {
-      console.log('LearnSphere: No selection object available');
-    }
-  }
-
-  private showSelectionActionButton(selection: Selection) {
-    console.log('LearnSphere: Creating selection action button...');
-    
-    // Remove existing button if any
-    const existingButton = document.getElementById('learnsphere-selection-button');
-    if (existingButton) {
-      existingButton.remove();
-    }
-    
-    try {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      
-      console.log('LearnSphere: Selection rectangle:', rect);
-      
-      // Calculate button position - ensure it's visible
-      const buttonTop = Math.max(10, rect.top - 60); // At least 10px from top
-      const buttonLeft = Math.max(10, Math.min(window.innerWidth - 200, rect.left + rect.width / 2)); // Ensure it's within viewport
-      
-      const button = document.createElement('div');
-      button.id = 'learnsphere-selection-button';
-      button.style.cssText = `
-        position: fixed;
-        top: ${buttonTop}px;
-        left: ${buttonLeft}px;
-        background: linear-gradient(135deg, #1a73e8, #0d47a1);
-        color: white;
-        padding: 12px 20px;
-        border-radius: 25px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        z-index: 10002;
-        box-shadow: 0 4px 16px rgba(26, 115, 232, 0.4);
-        transform: translateX(-50%);
-        animation: fadeIn 0.3s ease;
-        border: 2px solid #ffffff;
-        white-space: nowrap;
-        user-select: none;
-      `;
-      button.innerHTML = `
-        <span style="font-size: 16px; margin-right: 8px;">💬</span>
-        <span>Chat about this</span>
-      `;
-      
-      // Add CSS animation
-      const style = document.createElement('style');
-      style.textContent = `
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-      `;
-      document.head.appendChild(style);
-      
-      button.addEventListener('click', () => {
-        console.log('LearnSphere: Chat button clicked!');
-        const selectedText = selection.toString().trim();
-        console.log('LearnSphere: Selected text:', selectedText);
-        
-        this.openSidebar({ 
-          text: selectedText, 
-          pageNumber: 1, // Default to page 1 for now
-          coordinates: {
-            x: rect.left,
-            y: rect.top,
-            width: rect.width,
-            height: rect.height
-          }
-        });
-        button.remove();
-      });
-      
-      // Add hover effects
-      button.addEventListener('mouseenter', () => {
-        button.style.background = 'linear-gradient(135deg, #0d47a1, #1a73e8)';
-        button.style.transform = 'translateX(-50%) scale(1.05)';
-      });
-      
-      button.addEventListener('mouseleave', () => {
-        button.style.background = 'linear-gradient(135deg, #1a73e8, #0d47a1)';
-        button.style.transform = 'translateX(-50%) scale(1)';
-      });
-      
-      document.body.appendChild(button);
-      console.log('LearnSphere: Selection button created and added to DOM');
-      
-      // Remove button when selection changes or after timeout
-      const removeButton = () => {
-        if (button.parentNode) {
-          button.parentNode.removeChild(button);
-          console.log('LearnSphere: Selection button removed');
-        }
-      };
-      
-      // Remove button after 8 seconds
-      setTimeout(removeButton, 8000);
-      
-      // Also remove button when selection changes
-      const selectionObserver = () => {
-        const currentSelection = window.getSelection();
-        if (!currentSelection || currentSelection.toString().trim().length === 0) {
-          removeButton();
-          document.removeEventListener('selectionchange', selectionObserver);
-        }
-      };
-      document.addEventListener('selectionchange', selectionObserver);
-      
-    } catch (error) {
-      console.error('LearnSphere: Error creating selection button:', error);
-    }
-  }
-
-  private async manualActivate() {
-    try {
-      console.log('LearnSphere: Manual activation started');
-      
-      // Initialize services if not already done
-      if (!this.pdfViewerService) {
-        this.pdfViewerService = new PDFViewerService();
-      }
-      if (!this.settingsService) {
-        this.settingsService = SettingsService.getInstance();
-      }
-      
-      // Check if we have a valid API key
-      const apiKey = this.settingsService.getGeminiApiKey();
-      if (apiKey && this.settingsService.validateApiKey(apiKey)) {
-        console.log('LearnSphere: Valid API key found, activating extension');
-        this.activateExtension(apiKey);
-        this.showNotification('Extension activated successfully!', 'success');
-      } else {
-        console.log('LearnSphere: No valid API key, opening settings');
-        this.showNotification('No valid API key found. Opening settings...', 'info');
-        chrome.runtime.openOptionsPage();
-      }
-    } catch (error) {
-      console.error('LearnSphere: Manual activation failed:', error);
-      this.showNotification('Manual activation failed. Check console for details.', 'error');
-    }
+async function loadGeminiKey(): Promise<string | null> {
+  try {
+    const result = await chrome.storage.sync.get('learnsphere_settings');
+    const key = result?.learnsphere_settings?.geminiApiKey || null;
+    geminiApiKey = key;
+    return key;
+  } catch (e) {
+    console.warn('LearnSphere: Failed to load API key from storage', e);
+    return null;
   }
 }
 
-// Initialize the content script
-new LearnSphereContent();
+async function callGemini(prompt: string): Promise<string> {
+  const key = geminiApiKey || (await loadGeminiKey());
+  if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }]}],
+      generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 }
+    })
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${err}`);
+  }
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+}
+
+// --- Markdown rendering utilities (safe subset) ---
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function inlineFormat(s: string): string {
+  // bold then italic then code then links
+  let out = s;
+  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  out = out.replace(/_(.+?)_/g, '<em>$1</em>');
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  out = out.replace(/(https?:\/\/[^\s)]+)|(www\.[^\s)]+)/g, (m) => {
+    const href = m.startsWith('http') ? m : `https://${m}`;
+    return `<a href="${href}" target="_blank" rel="noopener">${m}</a>`;
+  });
+  return out;
+}
+
+function markdownToHtml(md: string): string {
+  const lines = escapeHtml(md).split(/\r?\n/);
+  const html: string[] = [];
+  let listOpen = false;
+  let listType: 'ul' | 'ol' | null = null;
+
+  const closeList = () => {
+    if (listOpen && listType) {
+      html.push(`</${listType}>`);
+      listOpen = false;
+      listType = null;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { closeList(); continue; }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      closeList();
+      const level = h[1].length;
+      html.push(`<h${level}>${inlineFormat(h[2])}</h${level}>`);
+      continue;
+    }
+
+    const ol = line.match(/^(\d+)\.\s+(.*)$/);
+    if (ol) {
+      if (!listOpen || listType !== 'ol') { closeList(); html.push('<ol>'); listOpen = true; listType = 'ol'; }
+      html.push(`<li>${inlineFormat(ol[2])}</li>`);
+      continue;
+    }
+
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    if (ul) {
+      if (!listOpen || listType !== 'ul') { closeList(); html.push('<ul>'); listOpen = true; listType = 'ul'; }
+      html.push(`<li>${inlineFormat(ul[1])}</li>`);
+      continue;
+    }
+
+    closeList();
+    html.push(`<p>${inlineFormat(line)}</p>`);
+  }
+  closeList();
+  return `<div class="ls-md">${html.join('\n')}</div>`;
+}
+
+// Inject minimal styles so we don't rely on external CSS
+function ensureSidebarStyles(): void {
+  if (document.getElementById('learnsphere-inline-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'learnsphere-inline-styles';
+  style.textContent = `
+    #learnsphere-sidebar { position: fixed; top: 0; right: 0; height: 100%; width: 380px; max-width: 92vw; background: #ffffff; box-shadow: -2px 0 12px rgba(0,0,0,0.15); z-index: 2147483647; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Arial, sans-serif; }
+    .ls-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #eee; }
+    .ls-header h2 { margin: 0; font-size: 16px; }
+    .ls-close { border: none; background: transparent; font-size: 18px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+    .ls-tabs { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #f1f1f1; }
+    .ls-tab { padding: 6px 10px; border-radius: 6px; border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer; font-size: 12px; }
+    .ls-tab.active { background: #e6f0ff; border-color: #bcd2ff; }
+    .ls-content { flex: 1; overflow: auto; padding: 12px; }
+    .ls-footer { border-top: 1px solid #eee; padding: 8px 12px; }
+    .ls-textarea { width: 100%; min-height: 70px; resize: vertical; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; }
+    .ls-button { margin-top: 8px; width: 100%; padding: 8px 10px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font-size: 13px; }
+    .ls-chip { display: inline-block; padding: 2px 6px; background: #f3f4f6; border-radius: 999px; font-size: 11px; color: #374151; }
+    .ls-message { padding: 10px 12px; border-radius: 8px; margin: 8px 0; font-size: 13px; line-height: 1.55; }
+    .ls-message.user { background: #eef2ff; border: 1px solid #e0e7ff; color: #1e3a8a; }
+    .ls-message.assistant { background: #eef6ff; border: 1px solid #dbeafe; color: #1e40af; }
+    .ls-md h1 { font-size: 18px; margin: 10px 0 8px; }
+    .ls-md h2 { font-size: 16px; margin: 10px 0 6px; }
+    .ls-md h3 { font-size: 15px; margin: 8px 0 6px; }
+    .ls-md p { margin: 8px 0; }
+    .ls-md ul, .ls-md ol { margin: 8px 0 8px 18px; }
+    .ls-md li { margin: 4px 0; }
+    .ls-md code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    .ls-md pre { background: #0f172a; color: #e2e8f0; padding: 8px; border-radius: 6px; overflow: auto; }
+    .ls-md a { color: #1d4ed8; text-decoration: underline; }
+    .ls-md strong { font-weight: 600; }
+    .ls-md em { font-style: italic; }
+    /* Quiz specific */
+    .ls-quiz-q { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 18px 0 24px; background: #ffffff; }
+    .ls-quiz-q h4 { margin: 0 0 10px; font-size: 14px; }
+    .ls-quiz-options { display: grid; gap: 10px; margin: 10px 0 12px; }
+    .ls-quiz-option { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer; }
+    .ls-quiz-option input { margin-top: 3px; }
+    .ls-quiz-option.correct { border-color: #22c55e; background: #f0fdf4; }
+    .ls-quiz-option.incorrect { border-color: #ef4444; background: #fef2f2; }
+    .ls-quiz-result { margin-top: 10px; font-size: 12px; padding: 8px 10px; border-left: 3px solid #93c5fd; background: #eff6ff; border-radius: 6px; }
+  `;
+  document.head.appendChild(style);
+}
+
+function removeExistingSidebar(): void {
+  const existing = document.getElementById('learnsphere-sidebar');
+  if (existing) existing.remove();
+}
+
+function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): void {
+  ensureSidebarStyles();
+  removeExistingSidebar();
+
+  const root = document.createElement('div');
+  root.id = 'learnsphere-sidebar';
+
+    const header = document.createElement('div');
+  header.className = 'ls-header';
+    const title = document.createElement('h2');
+  title.textContent = type === 'chat' ? 'LearnSphere — Chat' : type === 'summary' ? 'LearnSphere — Summary' : 'LearnSphere — Quiz';
+  const close = document.createElement('button');
+  close.className = 'ls-close';
+  close.textContent = '×';
+  close.title = 'Close';
+  close.addEventListener('click', () => root.remove());
+  header.append(title, close);
+
+  const tabs = document.createElement('div');
+  tabs.className = 'ls-tabs';
+  const tabDefs: Array<{key: 'chat'|'summary'|'quiz'; label: string}> = [
+    { key: 'chat', label: 'Chat' },
+    { key: 'summary', label: 'Summary' },
+    { key: 'quiz', label: 'Quiz' }
+  ];
+  tabDefs.forEach(def => {
+    const b = document.createElement('button');
+    b.className = 'ls-tab' + (def.key === type ? ' active' : '');
+    b.textContent = def.label;
+    b.addEventListener('click', () => createSidebar(def.key, selection));
+    tabs.appendChild(b);
+  });
+
+  const content = document.createElement('div');
+  content.className = 'ls-content';
+
+  const footer = document.createElement('div');
+  footer.className = 'ls-footer';
+
+  if (type === 'chat') {
+    if (selection) {
+      const chip = document.createElement('div');
+      chip.className = 'ls-chip';
+      chip.textContent = `Selected: ${selection.slice(0, 60)}${selection.length > 60 ? '…' : ''}`;
+      content.appendChild(chip);
+    }
+
+    const history = document.createElement('div');
+    history.id = 'ls-chat-history';
+    const hello = document.createElement('div');
+    hello.className = 'ls-message assistant';
+    hello.innerHTML = markdownToHtml('Ask me anything about this page or your selection.');
+    history.appendChild(hello);
+    content.appendChild(history);
+
+    const ta = document.createElement('textarea');
+    ta.id = 'ls-chat-input';
+    ta.placeholder = 'Type your question…';
+    ta.className = 'ls-textarea';
+
+    const send = document.createElement('button');
+    send.className = 'ls-button';
+    send.textContent = 'Send';
+    send.addEventListener('click', async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      const userMsg = document.createElement('div');
+      userMsg.className = 'ls-message user';
+      userMsg.innerHTML = markdownToHtml(text);
+      history.appendChild(userMsg);
+
+      ta.value = '';
+      const thinking = document.createElement('div');
+      thinking.className = 'ls-message assistant';
+      thinking.textContent = 'Thinking…';
+      history.appendChild(thinking);
+      history.scrollTop = history.scrollHeight;
+      try {
+        const guidelines = 'Respond in clean Markdown with headings, bullet points, and numbered steps when helpful. Keep answers concise and scannable.';
+        const context = selection ? `\n\nContext (selected):\n${selection}` : '';
+        const answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}`);
+        thinking.innerHTML = markdownToHtml(answer);
+      } catch (e) {
+        thinking.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+      }
+      history.scrollTop = history.scrollHeight;
+    });
+
+    footer.append(ta, send);
+  }
+
+  if (type === 'summary') {
+    const msg = document.createElement('div');
+    msg.className = 'ls-message assistant';
+    msg.innerHTML = markdownToHtml(`**Selected Text**\n\n${selection || 'No text selected.'}`);
+    content.appendChild(msg);
+
+    const out = document.createElement('div');
+    out.id = 'ls-summary-output';
+    out.className = 'ls-message assistant';
+    out.textContent = 'Click the button below to generate a summary.';
+    content.appendChild(out);
+
+    const btn = document.createElement('button');
+    btn.className = 'ls-button';
+    btn.textContent = 'Generate Summary';
+    btn.addEventListener('click', async () => {
+      try {
+        const base = selection || window.getSelection()?.toString() || document.title;
+        const prompt = `Summarize the following text using Markdown. Include a short title, key bullet points, and a brief takeaway section.\n\n${base}`;
+        out.textContent = 'Generating…';
+        const ans = await callGemini(prompt);
+        out.innerHTML = markdownToHtml(ans);
+      } catch (e) {
+        out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+      }
+    });
+    footer.appendChild(btn);
+  }
+
+  if (type === 'quiz') {
+    const msg = document.createElement('div');
+    msg.className = 'ls-message assistant';
+    msg.innerHTML = markdownToHtml(`**Selected Text**\n\n${selection || 'No text selected.'}`);
+    content.appendChild(msg);
+
+    const out = document.createElement('div');
+    out.id = 'ls-quiz-output';
+    out.className = 'ls-message assistant';
+    out.textContent = 'Click the button below to generate a quiz.';
+    content.appendChild(out);
+
+    const btn = document.createElement('button');
+    btn.className = 'ls-button';
+    btn.textContent = 'Generate Quiz';
+    btn.addEventListener('click', async () => {
+      try {
+        const base = selection || window.getSelection()?.toString() || document.title;
+        const prompt = `Return ONLY valid JSON (no markdown fences, no extra text): an array of 5 objects with fields 
+{"question": string, "options": [string,string,string,string], "correctAnswer": number (0-3), "explanation": string} 
+based on this text: \n${base}`;
+        out.textContent = 'Generating…';
+        const raw = await callGemini(prompt);
+        const questions = tryParseQuizJSON(raw);
+        if (!questions || !questions.length) {
+          out.innerHTML = markdownToHtml('**Sorry**: Could not parse quiz data. Please try again.');
+      return;
+    }
+        // Render interactive quiz
+        out.innerHTML = '';
+        renderInteractiveQuiz(out, questions);
+      } catch (e) {
+        out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+      }
+    });
+    footer.appendChild(btn);
+  }
+
+  root.append(header, tabs, content, footer);
+  document.body.appendChild(root);
+}
+
+function makeMessage(role: 'user' | 'assistant', text: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = `ls-message ${role}`;
+  el.innerHTML = markdownToHtml(text);
+  return el;
+}
+
+interface QuizQuestion { question: string; options: string[]; correctAnswer: number; explanation: string; }
+
+function stripCodeFences(s: string): string { return s.replace(/^```[a-zA-Z]*\n/m, '').replace(/```\s*$/m, ''); }
+
+function tryParseQuizJSON(text: string): QuizQuestion[] | null {
+  try {
+    const clean = stripCodeFences(text).trim();
+    // If response has prose, try to extract JSON array by first '[' and last ']'
+    const first = clean.indexOf('[');
+    const last = clean.lastIndexOf(']');
+    const jsonStr = first !== -1 && last !== -1 ? clean.slice(first, last + 1) : clean;
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter(q => q && Array.isArray(q.options) && typeof q.correctAnswer === 'number')
+        .map(q => ({
+          question: String(q.question || ''),
+          options: q.options.slice(0, 4).map((o: any) => String(o)),
+          correctAnswer: Math.min(Math.max(Number(q.correctAnswer), 0), 3),
+          explanation: String(q.explanation || '')
+        }));
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function renderInteractiveQuiz(container: HTMLElement, questions: QuizQuestion[]): void {
+  questions.forEach((q, idx) => {
+    const qWrap = document.createElement('div');
+    qWrap.className = 'ls-quiz-q';
+
+    const title = document.createElement('h4');
+    title.textContent = `Q${idx + 1}. ${q.question}`;
+    qWrap.appendChild(title);
+
+    const optionsWrap = document.createElement('div');
+    optionsWrap.className = 'ls-quiz-options';
+
+    const name = `lsq-${Date.now()}-${idx}`;
+    q.options.forEach((opt, i) => {
+      const label = document.createElement('label');
+      label.className = 'ls-quiz-option';
+
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = name;
+      input.value = String(i);
+
+      const span = document.createElement('span');
+      span.innerHTML = markdownToHtml(opt);
+
+      label.append(input, span);
+      optionsWrap.appendChild(label);
+    });
+
+    const result = document.createElement('div');
+    result.className = 'ls-quiz-result';
+
+    optionsWrap.addEventListener('change', (e) => {
+      const selected = Number((e.target as HTMLInputElement).value);
+      // Reset visual states
+      optionsWrap.querySelectorAll('.ls-quiz-option').forEach(el => el.classList.remove('correct', 'incorrect'));
+      const all = Array.from(optionsWrap.querySelectorAll('.ls-quiz-option')) as HTMLElement[];
+      if (selected === q.correctAnswer) {
+        all[selected].classList.add('correct');
+        result.innerHTML = markdownToHtml('**Correct!**\n\n' + q.explanation);
+      } else {
+        all[selected].classList.add('incorrect');
+        if (all[q.correctAnswer]) all[q.correctAnswer].classList.add('correct');
+        result.innerHTML = markdownToHtml('**Incorrect.**\n\n' + q.explanation);
+      }
+    });
+
+    qWrap.append(optionsWrap, result);
+    container.appendChild(qWrap);
+  });
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  try {
+    if (message.action === 'ping') {
+      sendResponse({ success: true, message: 'pong' });
+      return true;
+    }
+    if (message.action === 'openChatSidebar') {
+      createSidebar('chat', message.selection);
+      sendResponse({ success: true });
+      return true;
+    }
+    if (message.action === 'generateSummary') {
+      createSidebar('summary', message.selection);
+      sendResponse({ success: true });
+      return true;
+    }
+    if (message.action === 'generateQuiz') {
+      createSidebar('quiz', message.selection);
+      sendResponse({ success: true });
+      return true;
+    }
+    sendResponse({ success: false, message: 'Unknown action' });
+  } catch (e) {
+    console.error('🚀 LearnSphere: Error in message handler:', e);
+    sendResponse({ success: false, message: (e as Error).message });
+  }
+  return true;
+});
+
+console.log('🚀 LearnSphere: Content script ready.');
