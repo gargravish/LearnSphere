@@ -1,0 +1,17 @@
+# Task ID: 1
+# Title: Project Setup and Chrome Extension Foundation
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Set up the basic Chrome extension structure with Manifest V3, TypeScript, and React for the LearnSphere project.
+# Details:
+Create the foundational Chrome extension structure including:
+- Manifest V3 configuration
+- TypeScript setup with proper configuration
+- React integration for UI components
+- Basic folder structure (src/, public/, etc.)
+- Development environment setup with hot reloading
+- Basic extension popup and content script structure
+
+# Test Strategy:
+Verify extension loads in Chrome, popup opens, and content scripts can be injected into PDF pages.

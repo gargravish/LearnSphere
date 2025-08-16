@@ -1,0 +1,214 @@
+/* Options Container Styles */
+.options-container {
+  width: 100%;
+  height: 100vh;
+  background: #f8f9fa;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Ensure the settings page takes full height */
+.options-container .settings-page {
+  height: 100vh;
+}
+
+/* Dark theme support for the container */
+@media (prefers-color-scheme: dark) {
+  .options-container {
+    background: #1a1a1a;
+  }
+}
+
+.options-header {
+  background: linear-gradient(135deg, #1a73e8, #4285f4);
+  color: white;
+  padding: 32px;
+  text-align: center;
+}
+
+.options-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.options-header p {
+  margin: 0;
+  font-size: 16px;
+  opacity: 0.9;
+}
+
+.options-content {
+  padding: 32px;
+}
+
+.option-section {
+  margin-bottom: 40px;
+}
+
+.option-section h2 {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #e8eaed;
+  padding-bottom: 8px;
+}
+
+.option-group {
+  margin-bottom: 24px;
+}
+
+.option-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+}
+
+.option-group select,
+.option-group input[type="text"] {
+  width: 100%;
+  max-width: 300px;
+  padding: 12px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+}
+
+.option-group select:focus,
+.option-group input[type="text"]:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto !important;
+  max-width: none !important;
+  margin-right: 12px;
+  transform: scale(1.2);
+}
+
+.option-description {
+  margin: 8px 0 0 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.option-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #1a73e8;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1557b0;
+}
+
+.btn-secondary {
+  background: #f8f9fa;
+  color: #333;
+  border: 1px solid #dadce0;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e8eaed;
+}
+
+.btn-danger {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #c82333;
+}
+
+.options-footer {
+  padding: 24px 32px;
+  background: #f8f9fa;
+  border-top: 1px solid #e8eaed;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.save-status {
+  font-size: 14px;
+}
+
+.save-status .success {
+  color: #28a745;
+}
+
+.save-status .error {
+  color: #dc3545;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-size: 16px;
+}
+
+@media (max-width: 768px) {
+  .options-container {
+    margin: 0;
+    border-radius: 0;
+  }
+  
+  .options-header {
+    padding: 24px 20px;
+  }
+  
+  .options-content {
+    padding: 24px 20px;
+  }
+  
+  .options-footer {
+    padding: 20px;
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .option-actions {
+    flex-direction: column;
+  }
+  
+  .btn {
+    width: 100%;
+  }
+}

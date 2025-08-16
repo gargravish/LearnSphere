@@ -1,0 +1,18 @@
+# Task ID: 8
+# Title: Study Aid Generation - Multiple Choice Quizzes
+# Status: pending
+# Dependencies: 6
+# Priority: high
+# Description: Implement MCQ generation with challenging questions and plausible distractors.
+# Details:
+Create quiz generation system:
+- Generate multiple choice questions from PDF content
+- Create plausible distractors using AI
+- Implement quiz interface with scoring
+- Add immediate feedback for answers
+- Track quiz results locally
+- Support different difficulty levels
+- Ensure questions are grounded in source material
+
+# Test Strategy:
+Generate quizzes for various topics and verify question quality and answer accuracy.

@@ -1,0 +1,17 @@
+# Task ID: 7
+# Title: Study Aid Generation - Summaries
+# Status: pending
+# Dependencies: 6
+# Priority: high
+# Description: Implement summary generation functionality for different scopes (page, chapter, document).
+# Details:
+Build summary generation:
+- Implement scope selection (Current Page, Selected Chapter, Entire Document)
+- Generate brief and detailed summary options
+- Use Gemini API for content analysis
+- Ensure summaries are grounded in PDF content
+- Add export functionality for summaries
+- Implement progress indicators during generation
+
+# Test Strategy:
+Generate summaries for various PDF types and verify accuracy and relevance.

@@ -1,0 +1,195 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Project Setup and Chrome Extension Foundation",
+        "description": "Set up the basic Chrome extension structure with Manifest V3, TypeScript, and React for the LearnSphere project.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [],
+        "details": "Create the foundational Chrome extension structure including:\n- Manifest V3 configuration\n- TypeScript setup with proper configuration\n- React integration for UI components\n- Basic folder structure (src/, public/, etc.)\n- Development environment setup with hot reloading\n- Basic extension popup and content script structure",
+        "testStrategy": "Verify extension loads in Chrome, popup opens, and content scripts can be injected into PDF pages."
+      },
+      {
+        "id": 2,
+        "title": "PDF Viewer Integration and Override",
+        "description": "Integrate with Chrome's PDF viewer to override default behavior and inject LearnSphere functionality.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "details": "Implement PDF viewer integration:\n- Override Chrome's default PDF viewer for both web URLs and local files\n- Integrate PDF.js for accurate rendering and layout preservation\n- Ensure multimodal elements (diagrams, charts, equations) are properly rendered\n- Set up content script injection into PDF pages\n- Handle both online and offline PDF access",
+        "testStrategy": "Test with various PDF types (text-heavy, image-heavy, mixed content) and verify proper rendering and script injection."
+      },
+      {
+        "id": 3,
+        "title": "Document Processing and RAG Indexing",
+        "description": "Implement document processing pipeline for PDF content extraction and RAG indexing using Vertex AI.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "details": "Build document processing system:\n- Extract text content from PDF pages\n- Implement OCR for scanned documents if necessary\n- Extract multimodal elements (images, diagrams, charts)\n- Create embeddings using Vertex AI Vector Search\n- Index content for efficient retrieval\n- Implement document metadata storage",
+        "testStrategy": "Process various PDF types and verify accurate content extraction and indexing."
+      },
+      {
+        "id": 4,
+        "title": "Text Selection and Highlighting Interface",
+        "description": "Implement text selection and highlighting functionality for user interaction with PDF content.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "details": "Create text selection interface:\n- Enable text highlighting on PDF pages\n- Implement selection event handling\n- Create visual feedback for selected text\n- Store selection coordinates and content\n- Handle multi-page selections\n- Ensure compatibility with PDF.js rendering",
+        "testStrategy": "Test text selection across different PDF layouts and verify accurate content capture."
+      },
+      {
+        "id": 5,
+        "title": "Contextual Chat Sidebar UI",
+        "description": "Design and implement the chat sidebar interface for LearnSphere interactions.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          4
+        ],
+        "details": "Build chat sidebar component:\n- Create collapsible sidebar UI\n- Implement chat message interface\n- Add input field for user questions\n- Display conversation history\n- Show selected content context\n- Implement loading states and error handling\n- Ensure responsive design for different screen sizes",
+        "testStrategy": "Test sidebar functionality, chat interface, and responsive behavior across different devices."
+      },
+      {
+        "id": 6,
+        "title": "AI Integration with Gemini API",
+        "description": "Integrate Google Gemini API for AI-powered responses with strict RAG implementation.",
+        "status": "done",
+        "priority": "critical",
+        "dependencies": [
+          3,
+          5
+        ],
+        "details": "Implement AI integration:\n- Set up Vertex AI client for Gemini access\n- Implement strict RAG to constrain responses to PDF content only\n- Create prompt engineering for accurate, grounded responses\n- Handle API rate limiting and error cases\n- Implement streaming responses for better UX\n- Add authentication for API access\n- Ensure secure data transmission",
+        "testStrategy": "Test AI responses with various PDF content and verify strict adherence to source material."
+      },
+      {
+        "id": 7,
+        "title": "Study Aid Generation - Summaries",
+        "description": "Implement summary generation functionality for different scopes (page, chapter, document).",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          6
+        ],
+        "details": "Build summary generation:\n- Implement scope selection (Current Page, Selected Chapter, Entire Document)\n- Generate brief and detailed summary options\n- Use Gemini API for content analysis\n- Ensure summaries are grounded in PDF content\n- Add export functionality for summaries\n- Implement progress indicators during generation",
+        "testStrategy": "Generate summaries for various PDF types and verify accuracy and relevance."
+      },
+      {
+        "id": 8,
+        "title": "Study Aid Generation - Multiple Choice Quizzes",
+        "description": "Implement MCQ generation with challenging questions and plausible distractors.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          6
+        ],
+        "details": "Create quiz generation system:\n- Generate multiple choice questions from PDF content\n- Create plausible distractors using AI\n- Implement quiz interface with scoring\n- Add immediate feedback for answers\n- Track quiz results locally\n- Support different difficulty levels\n- Ensure questions are grounded in source material",
+        "testStrategy": "Generate quizzes for various topics and verify question quality and answer accuracy."
+      },
+      {
+        "id": 9,
+        "title": "Local Database Implementation with IndexedDB",
+        "description": "Implement local database using IndexedDB for storing learning analytics and user data.",
+        "status": "pending",
+        "priority": "critical",
+        "dependencies": [
+          7,
+          8
+        ],
+        "details": "Set up local database:\n- Implement IndexedDB using Dexie.js wrapper\n- Design database schema for learning analytics\n- Store quiz results, scores, and missed questions\n- Track contextual chat query topics\n- Implement data persistence and retrieval\n- Add database migration capabilities\n- Ensure data integrity and error handling",
+        "testStrategy": "Test database operations, data persistence, and performance with various data loads."
+      },
+      {
+        "id": 10,
+        "title": "Local Knowledge Gap Analysis",
+        "description": "Implement client-side analysis to identify user knowledge gaps and learning patterns.",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          9
+        ],
+        "details": "Build knowledge gap analysis:\n- Analyze quiz performance data locally\n- Identify consistently missed topics/keywords\n- Track learning progress over time\n- Generate personalized insights\n- Create topic difficulty assessments\n- Implement learning pattern recognition\n- Ensure privacy by keeping analysis local",
+        "testStrategy": "Test analysis accuracy with sample data and verify privacy compliance."
+      },
+      {
+        "id": 11,
+        "title": "Personalized Dashboard UI",
+        "description": "Create a dashboard for users to view learning statistics and identified knowledge gaps.",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          10
+        ],
+        "details": "Design and implement dashboard:\n- Create dashboard layout and navigation\n- Display learning statistics and progress\n- Show identified knowledge gaps\n- Implement data visualization components\n- Add export functionality for learning data\n- Ensure responsive design\n- Integrate with local database for real-time data",
+        "testStrategy": "Test dashboard functionality, data display accuracy, and responsive behavior."
+      },
+      {
+        "id": 12,
+        "title": "Customized Revision Plan Generation",
+        "description": "Implement system to generate proactive revision suggestions based on knowledge gap analysis.",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          10,
+          11
+        ],
+        "details": "Build revision planning system:\n- Generate targeted revision suggestions\n- Link suggestions to specific PDF sections\n- Create personalized study recommendations\n- Implement revision plan tracking\n- Add progress monitoring for revision activities\n- Ensure suggestions are actionable and specific\n- Integrate with quiz system for targeted practice",
+        "testStrategy": "Test revision plan generation and verify effectiveness in improving learning outcomes."
+      },
+      {
+        "id": 13,
+        "title": "Extension Configuration and Settings",
+        "description": "Implement user settings and configuration options for the LearnSphere extension.",
+        "status": "done",
+        "priority": "medium",
+        "dependencies": [
+          1
+        ],
+        "details": "Create settings interface:\n- Add extension popup with settings\n- Implement user preferences storage\n- Add configuration for AI model selection\n- Create privacy and data management options\n- Add export/import functionality for user data\n- Implement theme and UI customization\n- Add help and documentation access",
+        "testStrategy": "Test settings persistence, configuration options, and user preference management."
+      },
+      {
+        "id": 14,
+        "title": "Error Handling and User Feedback",
+        "description": "Implement comprehensive error handling and user feedback mechanisms throughout the extension.",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          6,
+          9
+        ],
+        "details": "Build error handling system:\n- Implement graceful error handling for API failures\n- Add user-friendly error messages\n- Create loading states and progress indicators\n- Implement retry mechanisms for failed operations\n- Add offline mode handling\n- Create error logging and reporting\n- Ensure consistent error messaging across features",
+        "testStrategy": "Test error scenarios, user feedback, and recovery mechanisms."
+      },
+      {
+        "id": 15,
+        "title": "Testing and Quality Assurance",
+        "description": "Implement comprehensive testing suite for all LearnSphere functionality.",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          12,
+          13,
+          14
+        ],
+        "details": "Create testing framework:\n- Implement unit tests for core functionality\n- Add integration tests for AI interactions\n- Create end-to-end tests for user workflows\n- Test with various PDF types and content\n- Implement performance testing\n- Add accessibility testing\n- Create automated testing pipeline",
+        "testStrategy": "Run comprehensive test suite and verify all functionality works as expected."
+      }
+    ],
+    "metadata": {
+      "created": "2025-08-15T20:39:13.643Z",
+      "updated": "2025-08-15T22:38:34.091Z",
+      "description": "Tasks for master context"
+    }
+  }
+}

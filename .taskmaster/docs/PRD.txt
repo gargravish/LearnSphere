@@ -1,0 +1,184 @@
+Product Requirements Document (PRD): LearnSphere: The Interactive PDF Scholar
+
+Date: October 26, 2023
+Version: 1.1 (Revised: Local-First Architecture)
+Author: [Team/Author Name]
+
+1. Introduction and Vision
+1.1. Problem Statement
+
+Students and professionals frequently engage with dense, complex PDF documents. Traditional study methods involving static PDFs are inefficient and often fail to facilitate deep understanding, particularly with multimodal content. Learners need a tool to actively interrogate their materials, clarify concepts instantly, generate study aids, and track their progress without leaving the document context.
+
+1.2. Product Vision
+
+LearnSphere transforms static PDF documents into dynamic, interactive learning environments. It acts as a personalized AI tutor embedded directly within the study material, utilizing a local-first approach to ensure privacy, accessibility, and immediate access to learning analytics.
+
+1.3. The Gemini Edge
+
+The success of LearnSphere hinges on Google Gemini's native multimodal capabilities. Unlike tools relying solely on extracted text, LearnSphere analyzes text alongside diagrams, charts, equations, and the document's layout. This allows for nuanced understanding and the generation of accurate, contextually relevant study aids and explanations.
+
+2. Goals and Objectives
+2.1. Primary Goals
+
+Enhance Comprehension: Improve user understanding of complex topics through instant, context-aware explanations and visualizations.
+
+Improve Study Efficiency: Automate the generation of study aids (summaries, flashcards, quizzes) to save user time.
+
+Personalize Learning (Local-First): Utilize local data analytics to identify knowledge gaps and proactively suggest personalized revision strategies.
+
+2.2. Key Performance Indicators (KPIs)
+
+Activation Rate: % of users interacting with at least one PDF within the first week.
+
+Engagement (DAU/MAU): Daily Active Users relative to Monthly Active Users.
+
+Feature Adoption: Usage frequency of Contextual Chat vs. Study Aid Generation vs. Personalized Review.
+
+Learning Efficacy: Average improvement in scores between the first and subsequent quizzes on the same topic (tracked locally).
+
+Cloud Sync Adoption (Optional): % of users opting into the cloud backup feature.
+
+3. Target Audience and Personas
+3.1. Target Audience
+
+Higher education students, postgraduate researchers, and professionals requiring continuous learning (Medical, Legal, STEM).
+
+3.2. Personas
+
+Alex (Medical Student): Needs to understand complex biological pathways. Requires accurate flashcards and tracking of quiz performance. Values accuracy and data privacy.
+
+Sarah (Law Student): Needs to analyze case law and summarize lengthy arguments efficiently.
+
+David (Research Scientist): Needs to rapidly digest new research papers and understand methodology from charts/graphs.
+
+4. Functional Requirements
+4.1. Core Platform: PDF Interaction Layer
+ID	Requirement	Priority
+F-1.1	The extension MUST integrate with or override the Chrome PDF viewer for web URLs and local files.	High
+F-1.2	The viewer MUST render PDFs accurately, preserving layouts and multimodal elements (using PDF.js or similar).	High
+F-1.3	Document Processing: Upon opening, the PDF must be processed (OCR if necessary, multimodal extraction) and indexed for Retrieval Augmented Generation (RAG).	High
+F-1.4	Multimodal Selection: Users MUST be able to select text (highlighting) AND draw bounding boxes around non-text elements (diagrams, charts, equations).	High
+4.2. Feature: Contextual Chat
+ID	Requirement	Priority
+F-2.1	Highlighting or selecting an area (F-1.4) MUST trigger an "Ask LearnSphere" interaction prompt.	High
+F-2.2	Clicking the prompt MUST open the chat sidebar, automatically passing the selected content as context.	High
+F-2.3	AI Grounding (Strict RAG): The AI (Gemini) MUST be strictly constrained to base responses ONLY on the information within the loaded PDF.	Critical
+F-2.4	Multimodal Understanding: The system must utilize Gemini to analyze the visual structure, layout, and content of diagrams/charts when responding.	High
+F-2.5	The sidebar SHALL maintain a history of interactions linked to the specific document, stored locally.	Medium
+4.3. Feature: Dynamic Study Aid Generation
+ID	Requirement	Priority
+F-3.1	Users MUST be able to select the scope: Current Page, Selected Chapter, or Entire Document.	High
+F-3.2	Summaries: Generate concise summaries (Brief vs. Detailed).	High
+F-3.3	Digital Flashcards: Generate Term/Definition pairs.	High
+F-3.3.1	Users MUST be able to review, edit, store locally, and export flashcards (e.g., Anki, CSV).	Medium
+F-3.4	Multiple-Choice Quizzes (MCQs): Generate challenging questions with plausible distractors.	High
+F-3.4.1	Upon completion, the user MUST receive a score and feedback. Results must be recorded locally (See F-5.2).	High
+4.4. Feature: Concept Visualization & Simplification
+ID	Requirement	Priority
+F-4.1	ELI5: Users can request an "Explain Like I'm Five" simplification.	Medium
+F-4.2	Visualization: Users can request "Visualize this concept." The AI should generate structured text aids or flowcharts (e.g., using Mermaid.js syntax).	Medium
+4.5. Feature: Personalized Learning Profile (Local-First)
+
+This feature ensures the extension is fully functional offline and respects user privacy by prioritizing local storage for learning analytics.
+
+ID	Requirement	Priority
+F-5.1	Local Database Implementation: The extension MUST implement a local database. Since direct SQLite integration is not feasible in standard Chrome extensions, IndexedDB must be used for structured data storage. Libraries like Dexie.js should be utilized to manage interactions.	Critical
+F-5.2	Local Data Tracking: The system MUST track and log the following events to the local IndexedDB: Quiz results (score, missed questions, associated topics/keywords), and frequency/nature of Contextual Chat queries (topics).	High
+F-5.3	Local Knowledge Gap Analysis: The extension MUST process the data stored in IndexedDB locally (client-side) to identify concepts the user consistently struggles with.	High
+F-5.4	Personalized Dashboard: A dedicated dashboard where users can view their learning statistics and identified knowledge gaps, reading data directly from the local DB.	Medium
+F-5.5	Customized Revision Plans: The system MUST generate proactive revision suggestions based on the local gap analysis (e.g., "You've missed 3 questions related to 'Krebs Cycle intermediates.' Let's review that section.")	High
+4.6. Feature: Optional Cloud Sync & Analytics
+
+Provides backup, cross-device synchronization, and advanced analytics for users who opt-in.
+
+ID	Requirement	Priority
+F-6.1	Opt-In Only: Cloud synchronization MUST be disabled by default and require explicit user consent and authentication.	High
+F-6.2	Data Synchronization: If enabled, the local IndexedDB data is synchronized to a secure cloud backend (e.g., Firestore or other transactional DB).	Medium
+F-6.3	BigQuery Integration (Optional): If Cloud Sync is enabled, the synchronized data can be piped to BigQuery. This serves as an optional layer for long-term backup, disaster recovery, and advanced analytical queries by the user or organization.	Low
+F-6.4	The extension MUST NOT require Cloud Sync (F-6.1) to be enabled for any core personalization functionality (F-5.1 to F-5.5).	Critical
+5. System Architecture & Technology Stack
+5.1. Architecture Overview
+
+A client-heavy, local-first Chrome Extension. Analytics and personalization are processed on the client side. The extension communicates with a scalable, serverless backend infrastructure on GCP primarily for AI processing (RAG) and optional data synchronization.
+
+5.2. Technology Stack (Revised)
+
+Frontend (Chrome Extension): Manifest V3, TypeScript, React (for UI), PDF.js (for rendering).
+
+Local Database: IndexedDB (using Dexie.js or similar wrapper).
+
+Backend (API & Processing): Google Cloud Functions / Cloud Run (Serverless). Node.js or Python.
+
+AI Layer: Vertex AI, utilizing Gemini Pro/Ultra.
+
+RAG Implementation: Vertex AI Vector Search (or similar vector DB) for document embeddings.
+
+Authentication: Firebase Authentication / Google Identity Platform (required for AI access and optional sync).
+
+Database (Cloud - Optional): Firestore (or similar) for user metadata and synchronization of learning profiles.
+
+Analytics Database (Cloud - Optional): BigQuery for optional backup and advanced analysis of learning analytics.
+
+6. Non-Functional Requirements
+6.1. Performance & Latency
+
+AI chat response time (time-to-first-token) should be under 3 seconds.
+
+Study aid generation should take less than 30 seconds for a typical 30-page document.
+
+Local database queries (for the dashboard and revision plans) must be near-instantaneous (<200ms).
+
+6.2. Accuracy and Grounding
+
+The highest priority NFR. The AI must strictly adhere to the source material. Hallucinations must be minimized to near zero.
+
+6.3. Security & Privacy
+
+PDFs are sensitive. Processing via AI APIs must be secure (encrypted in transit).
+
+User data (PDFs or extracted content) must NOT be used for model training.
+
+Local-First Privacy: Storing learning profiles locally (IndexedDB) enhances user privacy by default.
+
+Cloud Sync must use strong encryption and clear consent mechanisms.
+
+7. UX/UI Design Principles
+7.1. Design Principles
+
+Unobtrusive: The PDF content remains the primary focus.
+
+Context-Aware: Interactions must feel natural and directly tied to the content.
+
+Trustworthy and Transparent: The design language should be professional. Clearly indicate where data is stored (Local vs. Cloud Synced).
+
+7.2. Key User Flows
+
+Personalized Review (Local): User opens the dashboard -> Sees a weak topic notification (generated from IndexedDB) -> Accepts the suggested revision plan -> Is directed to the relevant PDF section -> Takes a targeted quiz -> Results are stored locally.
+
+8. Milestones and Roadmap
+
+The product will be developed iteratively with a focus on core functionality and local processing first.
+
+Phase 1: MVP - The Grounded Assistant (Est. 2 Months)
+
+Features: Chrome Extension framework, PDF viewer integration, Contextual Chat (Text selection only), Strict RAG implementation, Basic Summary and Quiz Generation.
+
+Phase 2: Multimodal Enhancement (Est. 3 Months)
+
+Features: Area Selection (Diagrams/Charts), Gemini Multimodal integration, Concept Visualization, Flashcard Generation (Local Storage) and Export.
+
+Phase 3: Localized Learning Engine (Est. 3 Months)
+
+Features: IndexedDB implementation, Local event tracking, Local Knowledge Gap Analysis, Personalized Dashboard, Customized Revision Plan generation.
+
+Phase 4: Cloud Services (Est. 1.5 Months)
+
+Features: Optional Cloud Sync feature development, Authentication, Synchronization logic (e.g., Firestore), BigQuery pipeline for backup (optional).
+
+9. Risks and Mitigation
+Risk	Description	Impact	Mitigation Strategy
+AI Hallucination/Accuracy	AI provides information not present in the PDF.	High	Rigorous prompt engineering emphasizing grounding. Implementing RAG architecture effectively.
+Complex PDF Layouts	PDFs with complex layouts may be misinterpreted.	Medium	Utilize Gemini's advanced document understanding. Manage user expectations.
+Local Storage Limits	IndexedDB has storage limits (based on available disk space). Extensive use might hit these limits.	Medium	Efficient data storage formats. Provide users tools to manage their local database (e.g., clearing old data).
+Data Loss (Local-First)	If the user uninstalls the extension or clears browser data, their local learning profile is lost.	High	Clearly communicate the risk of local storage and strongly encourage enabling the optional Cloud Sync (Phase 4) for backup.
+API Costs	High usage of Gemini could lead to unsustainable costs.	Medium	Optimize token usage. Implement a Freemium model.
