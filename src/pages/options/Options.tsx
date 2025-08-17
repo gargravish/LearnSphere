@@ -1,6 +1,7 @@
 import React from 'react';
 import SettingsPage from './SettingsPage';
 import QuizHistory from './QuizHistory';
+import KnowledgeTab from './KnowledgeTab';
 import './Options.css';
 
 const Options: React.FC = () => {
@@ -11,6 +12,9 @@ const Options: React.FC = () => {
       </div>
       <div>
         <QuizHistory />
+        <div style={{ marginTop: 16 }}>
+          <KnowledgeTab />
+        </div>
       </div>
     </div>
   );

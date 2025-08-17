@@ -42,6 +42,15 @@ export const StorageService = {
 
   async logEvent<T = any>(event: AnalyticsEvent<T>) {
     return db.logEvent(event);
+  },
+
+  async logSummaryGenerated(meta: { sourceUrl?: string; documentTitle?: string }) {
+    return db.logEvent({ eventType: 'summary_generated', createdAt: Date.now(), ...meta });
+  },
+
+  async logChatAsked(topic: string, meta?: { sourceUrl?: string; documentTitle?: string }) {
+    await db.addOrIncrementTopic(topic, meta);
+    return db.logEvent({ eventType: 'chat_asked', createdAt: Date.now(), payload: { topic }, ...meta });
   }
 };
 

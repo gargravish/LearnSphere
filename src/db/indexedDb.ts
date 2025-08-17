@@ -15,6 +15,25 @@ export class LearnSphereDB extends Dexie {
       analytics: '++id, eventType, createdAt'
     });
 
+    // v2: add documentTitle index and ensure chatTopics topic index exists
+    this.version(2).stores({
+      quizResults: '++id, createdAt, sourceUrl, percentage, documentTitle',
+      chatTopics: '++id, topic, lastAskedAt, count',
+      analytics: '++id, eventType, createdAt'
+    }).upgrade(async (tx) => {
+      try {
+        const results = await tx.table('quizResults').toArray();
+        for (const r of results) {
+          if (!('documentTitle' in r)) {
+            r.documentTitle = r.documentTitle || '';
+            await tx.table('quizResults').put(r);
+          }
+        }
+      } catch (e) {
+        // ignore migration errors; DB remains usable
+      }
+    });
+
     this.quizResults = this.table('quizResults');
     this.chatTopics = this.table('chatTopics');
     this.analytics = this.table('analytics');

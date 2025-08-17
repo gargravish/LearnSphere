@@ -1,5 +1,6 @@
 console.log('🚀 LearnSphere: Content script initializing...');
 import { QuizPersistenceService } from '@/services/QuizPersistenceService';
+import { StorageService } from '@/services/StorageService';
 
 // Minimal Gemini integration (no external imports)
 let geminiApiKey: string | null = null;
@@ -241,6 +242,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         const context = selection ? `\n\nContext (selected):\n${selection}` : '';
         const answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}`);
         thinking.innerHTML = markdownToHtml(answer);
+        try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
       } catch (e) {
         thinking.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
       }
@@ -272,6 +274,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         out.textContent = 'Generating…';
         const ans = await callGemini(prompt);
         out.innerHTML = markdownToHtml(ans);
+        try { await StorageService.logSummaryGenerated({ sourceUrl: location.href, documentTitle: document.title }); } catch {}
       } catch (e) {
         out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
       }

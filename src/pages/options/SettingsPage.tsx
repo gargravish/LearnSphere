@@ -155,7 +155,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
     { id: 'chat', label: 'Chat Settings', icon: '💬' },
     { id: 'privacy', label: 'Privacy & Data', icon: '🔒' },
     { id: 'accessibility', label: 'Accessibility', icon: '♿' },
-    { id: 'highlights', label: 'Highlights', icon: '🖍️' }
+    { id: 'highlights', label: 'Highlights', icon: '🖍️' },
+    { id: 'knowledge', label: 'Knowledge', icon: '📊' }
   ];
 
   const renderGeneralTab = () => (
@@ -624,6 +625,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
         return renderAccessibilityTab();
       case 'highlights':
         return renderHighlightsTab();
+      case 'knowledge':
+        return <div className="settings-tab"><h3>Loading…</h3></div>;
       default:
         return renderGeneralTab();
     }
