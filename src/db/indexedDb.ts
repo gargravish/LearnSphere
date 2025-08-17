@@ -1,10 +1,11 @@
 import Dexie, { Table } from 'dexie';
-import { QuizResult, ChatTopic, AnalyticsEvent, QuizStats } from './types';
+import { QuizResult, ChatTopic, AnalyticsEvent, QuizStats, RevisionPlan } from './types';
 
 export class LearnSphereDB extends Dexie {
   public quizResults!: Table<QuizResult, number>;
   public chatTopics!: Table<ChatTopic, number>;
   public analytics!: Table<AnalyticsEvent, number>;
+  public revisionPlans!: Table<RevisionPlan, number>;
 
   constructor() {
     super('LearnSphereDB');
@@ -34,9 +35,18 @@ export class LearnSphereDB extends Dexie {
       }
     });
 
+    // v3: add revisionPlans store
+    this.version(3).stores({
+      quizResults: '++id, createdAt, sourceUrl, percentage, documentTitle',
+      chatTopics: '++id, topic, lastAskedAt, count',
+      analytics: '++id, eventType, createdAt',
+      revisionPlans: '++id, createdAt'
+    });
+
     this.quizResults = this.table('quizResults');
     this.chatTopics = this.table('chatTopics');
     this.analytics = this.table('analytics');
+    this.revisionPlans = this.table('revisionPlans');
   }
 
   // Quiz results
@@ -80,8 +90,30 @@ export class LearnSphereDB extends Dexie {
   async logEvent<T = any>(event: AnalyticsEvent<T>): Promise<number> {
     return this.analytics.add({ ...event, createdAt: event.createdAt ?? Date.now() });
   }
+
+  // Revision plans
+  async createRevisionPlan(items: RevisionPlan['items']): Promise<number> {
+    return this.revisionPlans.add({ createdAt: Date.now(), items });
+  }
+
+  async getLatestRevisionPlan(): Promise<RevisionPlan | undefined> {
+    return this.revisionPlans.orderBy('createdAt').reverse().first();
+  }
 }
 
-export const db = new LearnSphereDB();
+// In Node/Jest, Dexie needs indexedDB shim. Skip if not available.
+let instance: LearnSphereDB;
+try {
+  // @ts-ignore
+  if (typeof indexedDB === 'undefined') {
+    // no-op fallback: use Dexie with fake shim memory (skip operations will throw). Consumers should mock in tests.
+    // We still construct to keep API shape for modules that import db.
+  }
+  instance = new LearnSphereDB();
+} catch {
+  instance = new LearnSphereDB();
+}
+
+export const db = instance;
 
 

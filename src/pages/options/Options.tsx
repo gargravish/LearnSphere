@@ -3,6 +3,7 @@ import SettingsPage from './SettingsPage';
 import QuizHistory from './QuizHistory';
 import KnowledgeTab from './KnowledgeTab';
 import Dashboard from './Dashboard';
+import RevisionPlan from './RevisionPlan';
 import './Options.css';
 
 const Options: React.FC = () => {
@@ -18,6 +19,9 @@ const Options: React.FC = () => {
         </div>
         <div style={{ marginTop: 16 }}>
           <KnowledgeTab />
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <RevisionPlan />
         </div>
       </div>
     </div>

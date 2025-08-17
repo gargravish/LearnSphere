@@ -18,25 +18,45 @@ async function loadGeminiKey(): Promise<string | null> {
   }
 }
 
+function sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
+
 async function callGemini(prompt: string): Promise<string> {
   const key = geminiApiKey || (await loadGeminiKey());
   if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }]}],
-      generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 }
-    })
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${err}`);
+  let attempt = 0;
+  let lastError: any = null;
+  const maxAttempts = 3;
+  while (attempt < maxAttempts) {
+    try {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        throw new Error('You appear to be offline. Please check your internet connection.');
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }]}],
+          generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 }
+        })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        // Retry on 5xx/transient errors
+        if (res.status >= 500 && res.status < 600) throw new Error(`Gemini server error ${res.status}: ${errText}`);
+        throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
+      }
+      const data = await res.json();
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+    } catch (e) {
+      lastError = e;
+      attempt += 1;
+      if (attempt >= maxAttempts) break;
+      await sleep(400 * attempt); // naive backoff
+    }
   }
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+  throw lastError || new Error('Unknown error while calling Gemini');
 }
 
 // --- Markdown rendering utilities (safe subset) ---
@@ -131,6 +151,9 @@ function ensureSidebarStyles(): void {
     .ls-message { padding: 10px 12px; border-radius: 8px; margin: 8px 0; font-size: 13px; line-height: 1.55; }
     .ls-message.user { background: #eef2ff; border: 1px solid #e0e7ff; color: #1e3a8a; }
     .ls-message.assistant { background: #eef6ff; border: 1px solid #dbeafe; color: #1e40af; }
+    .ls-banner { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; padding: 8px 10px; border-radius: 8px; margin: 8px 0; font-size: 12px; }
+    .ls-spinner { border: 3px solid #e5e7eb; border-top-color: #2563eb; width: 16px; height: 16px; border-radius: 50%; animation: ls-spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    @keyframes ls-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .ls-md h1 { font-size: 18px; margin: 10px 0 8px; }
     .ls-md h2 { font-size: 16px; margin: 10px 0 6px; }
     .ls-md h3 { font-size: 15px; margin: 8px 0 6px; }
@@ -199,6 +222,19 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
   const footer = document.createElement('div');
   footer.className = 'ls-footer';
 
+  // Offline banner
+  const banner = document.createElement('div');
+  banner.className = 'ls-banner';
+  banner.style.display = 'none';
+  banner.textContent = 'You are offline. Some features may be unavailable.';
+  const updateOnline = () => {
+    banner.style.display = typeof navigator !== 'undefined' && !navigator.onLine ? 'block' : 'none';
+  };
+  window.addEventListener('online', updateOnline);
+  window.addEventListener('offline', updateOnline);
+  updateOnline();
+  content.appendChild(banner);
+
   if (type === 'chat') {
     if (selection) {
       const chip = document.createElement('div');
@@ -234,7 +270,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       ta.value = '';
       const thinking = document.createElement('div');
       thinking.className = 'ls-message assistant';
-      thinking.textContent = 'Thinking…';
+      thinking.innerHTML = `<span class="ls-spinner"></span>Thinking…`;
       history.appendChild(thinking);
       history.scrollTop = history.scrollHeight;
       try {
@@ -244,7 +280,8 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         thinking.innerHTML = markdownToHtml(answer);
         try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
       } catch (e) {
-        thinking.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+        const msg = (e as Error).message || 'Unknown error';
+        thinking.innerHTML = markdownToHtml(`**Error:** ${msg}\n\nTry again in a few seconds. If the issue persists, verify your network and API key in Settings.`);
       }
       history.scrollTop = history.scrollHeight;
     });
@@ -271,12 +308,13 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       try {
         const base = selection || window.getSelection()?.toString() || document.title;
         const prompt = `Summarize the following text using Markdown. Include a short title, key bullet points, and a brief takeaway section.\n\n${base}`;
-        out.textContent = 'Generating…';
+        out.innerHTML = `<span class="ls-spinner"></span>Generating…`;
         const ans = await callGemini(prompt);
         out.innerHTML = markdownToHtml(ans);
         try { await StorageService.logSummaryGenerated({ sourceUrl: location.href, documentTitle: document.title }); } catch {}
       } catch (e) {
-        out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+        const msg = (e as Error).message || 'Unknown error';
+        out.innerHTML = markdownToHtml(`**Error:** ${msg}`);
       }
     });
     footer.appendChild(btn);
@@ -311,7 +349,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         const prompt = `Return ONLY valid JSON (no markdown fences, no extra text): an array of ${preferredCount} objects with fields 
 {"question": string, "options": [string,string,string,string], "correctAnswer": number (0-3), "explanation": string} 
 based on this text: \n${base}`;
-        out.textContent = 'Generating…';
+        out.innerHTML = `<span class="ls-spinner"></span>Generating…`;
         const raw = await callGemini(prompt);
         const questions = tryParseQuizJSON(raw);
         if (!questions || !questions.length) {
@@ -328,7 +366,8 @@ based on this text: \n${base}`;
         saveBtn.addEventListener('click', () => saveCurrentQuiz(out, questions));
         out.appendChild(document.createElement('div')).appendChild(saveBtn);
       } catch (e) {
-        out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
+        const msg = (e as Error).message || 'Unknown error';
+        out.innerHTML = markdownToHtml(`**Error:** ${msg}`);
       }
     });
     footer.appendChild(btn);

@@ -49,4 +49,21 @@ export interface QuizStats {
   lastAttemptAt?: number;
 }
 
+export type RevisionStatus = 'pending' | 'in-progress' | 'done';
+
+export interface RevisionPlanItem {
+  title: string;
+  description?: string;
+  sourceUrl?: string;
+  documentTitle?: string;
+  term?: string;
+  status: RevisionStatus;
+}
+
+export interface RevisionPlan {
+  id?: number;
+  createdAt: number; // epoch ms
+  items: RevisionPlanItem[];
+}
+
 
