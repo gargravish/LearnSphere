@@ -287,7 +287,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
           <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
           <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
         </select>
-        <p className="setting-description">Choose the Gemini model. Flash is fastest and most affordable; Pro offers higher quality. 1.5 models are deprecated.</p>
+        <p className="setting-description">Choose the Gemini model. Flash is fastest and most affordable; Pro offers higher quality. Tip: For image/screenshot questions, Pro can yield better OCR/vision reasoning. 1.5 models are deprecated.</p>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             className="test-api-button"

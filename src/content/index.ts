@@ -46,7 +46,7 @@ async function loadGeminiKey(): Promise<string | null> {
 
 function sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 
-async function callGemini(prompt: string): Promise<string> {
+async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxOutputTokens?: number }): Promise<string> {
   const key = geminiApiKey || (await loadGeminiKey());
   if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
 
@@ -54,6 +54,7 @@ async function callGemini(prompt: string): Promise<string> {
   let attempt = 0;
   let lastError: any = null;
   const maxAttempts = 3;
+  const maxOutputTokens = Math.max(256, Math.min(4096, Number(opts?.maxOutputTokens ?? 2048)));
   while (attempt < maxAttempts) {
     try {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -64,7 +65,7 @@ async function callGemini(prompt: string): Promise<string> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }]}],
-          generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 }
+          generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens }
         })
       });
       if (!res.ok) {
@@ -74,7 +75,22 @@ async function callGemini(prompt: string): Promise<string> {
         throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
       }
       const data = await res.json();
-      const text = extractGeminiText(data);
+      let text = extractGeminiText(data) || '';
+      const finish = String(data?.candidates?.[0]?.finishReason || '').toUpperCase();
+      // If truncated by token limit and allowed, try one continuation call
+      if (text && opts?.allowContinue && finish.includes('TOKEN')) {
+        const continuationPrompt = `Continue the previous answer without repeating. Stay concise and pick up exactly where you left off.\n\nOriginal task:\n${prompt}\n\nPartial answer so far:\n${text.slice(0, 4000)}`;
+        const res2 = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: continuationPrompt }]}], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
+        });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const extra = extractGeminiText(data2);
+          if (extra) text += (text.endsWith('\n') ? '' : '\n') + extra;
+        }
+      }
       if (text) return text;
       if (data?.promptFeedback?.blockReason) {
         return `Response blocked (${String(data.promptFeedback.blockReason)}). Try rephrasing or lowering safety.`;
@@ -91,26 +107,37 @@ async function callGemini(prompt: string): Promise<string> {
 }
 
 // Multimodal Gemini call with optional image/text parts
-async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; pastedText?: string }): Promise<string> {
+async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; pastedText?: string; allowContinue?: boolean; maxOutputTokens?: number }): Promise<string> {
   const key = geminiApiKey || (await loadGeminiKey());
   if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
-  parts.push({ text: prompt });
+  const parts: any[] = [];
+  // Prefer placing the image first to make intent clear to the model
+  if (opts?.imageBlob) {
+    const norm = await normalizeImageBlob(opts.imageBlob);
+    const mime = norm.type || 'image/png';
+    const uploadedUri = await uploadGeminiFile(norm, 'viewer-clipboard.jpg', key);
+    if (uploadedUri) {
+      parts.push({ fileData: { mimeType: mime, fileUri: uploadedUri } });
+    } else {
+      const base64 = await blobToBase64(norm);
+      parts.push({ inlineData: { mimeType: mime, data: base64 } });
+    }
+  }
+  // Include page URL/title to help the model when OCR text is ambiguous
+  const pageMeta = typeof location !== 'undefined' ? `\n\nPage: ${document.title} — ${location.href}` : '';
+  parts.push({ text: `${prompt}${pageMeta}` });
   if (opts?.pastedText && opts.pastedText.trim()) {
     parts.push({ text: `\n\nAdditional pasted text context provided by user:\n${opts.pastedText.trim()}` });
-  }
-  if (opts?.imageBlob) {
-    const base64 = await blobToBase64(opts.imageBlob);
-    parts.push({ inlineData: { mimeType: opts.imageBlob.type || 'image/png', data: base64 } });
   }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new Error('You appear to be offline. Please check your internet connection.');
   }
+  const maxOutputTokens = Math.max(256, Math.min(4096, Number(opts?.maxOutputTokens ?? 2048)));
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 } })
+    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -118,12 +145,48 @@ async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; p
     throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
   }
   const data = await res.json();
-  const text = extractGeminiText(data);
+  let text = extractGeminiText(data) || '';
+  const finish = String(data?.candidates?.[0]?.finishReason || '').toUpperCase();
+  if (text && opts?.allowContinue && finish.includes('TOKEN')) {
+    const cont = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: `Continue the previous answer without repeating.\n\nOriginal task:\n${prompt}\n\nPartial answer so far:\n${text.slice(0, 4000)}` }]}], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
+    });
+    if (cont.ok) {
+      const data2 = await cont.json();
+      const extra = extractGeminiText(data2);
+      if (extra) text += (text.endsWith('\n') ? '' : '\n') + extra;
+    }
+  }
   if (text) return text;
+  // Retry once with stronger OCR-first directive if image was present
+  if (opts?.imageBlob) {
+    const strongPrompt = 'First, transcribe all readable text from the provided image (OCR). Then solve the problem shown in the image. Return the solution with a brief explanation.';
+    const parts2: any[] = [];
+    const norm2 = await normalizeImageBlob(opts.imageBlob);
+    const mime = norm2.type || 'image/png';
+    const uploadedUri2 = await uploadGeminiFile(norm2, 'viewer-clipboard.jpg', key);
+    if (uploadedUri2) {
+      parts2.push({ fileData: { mimeType: mime, fileUri: uploadedUri2 } });
+    } else {
+      const base64 = await blobToBase64(norm2);
+      parts2.push({ inlineData: { mimeType: mime, data: base64 } });
+    }
+    parts2.push({ text: strongPrompt });
+    const res2 = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: parts2 }], generationConfig: { temperature: 0.2, topK: 20, topP: 0.8, maxOutputTokens } })
+    });
+    if (res2.ok) {
+      const data2 = await res2.json();
+      const text2 = extractGeminiText(data2);
+      if (text2) return text2;
+    }
+  }
   if (data?.promptFeedback?.blockReason) {
     return `Response blocked (${String(data.promptFeedback.blockReason)}). Try rephrasing or cropping the image.`;
   }
-  return '(No response)';
+  return '(No response — the model returned empty content. Try switching to Gemini 2.5 Pro in Settings for better image reasoning, or crop/clarify the screenshot.)';
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -137,6 +200,63 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+async function uploadGeminiFile(blob: Blob, filename: string, apiKey: string): Promise<string | null> {
+  try {
+    const url = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
+    const form = new FormData();
+    form.append('file', blob, filename);
+    const res = await fetch(url, { method: 'POST', body: form });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const name = json?.name as string | undefined;
+    if (!name) return null;
+    // Optionally poll brief for ACTIVE
+    const metaUrl = `https://generativelanguage.googleapis.com/v1beta/${name}?key=${apiKey}`;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const m = await fetch(metaUrl);
+        if (m.ok) {
+          const mj = await m.json();
+          if (!mj?.state || mj.state === 'ACTIVE') break;
+        }
+      } catch {}
+      await sleep(150);
+    }
+    return name;
+  } catch {
+    return null;
+  }
+}
+
+async function normalizeImageBlob(input: Blob): Promise<Blob> {
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const url = URL.createObjectURL(input);
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = url;
+    });
+    const maxDim = 1600;
+    const w = img.width;
+    const h = img.height;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    const outW = Math.max(1, Math.round(w * scale));
+    const outH = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = outW; canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return input;
+    ctx.drawImage(img, 0, 0, outW, outH);
+    const quality = 0.9;
+    const type = 'image/jpeg';
+    const blob: Blob | null = await new Promise(res => canvas.toBlob(b => res(b), type, quality));
+    return blob || input;
+  } catch {
+    return input;
+  }
 }
 
 // --- Markdown rendering utilities (safe subset) ---
@@ -167,11 +287,10 @@ function inlineFormat(s: string): string {
 function extractGeminiText(json: any): string | null {
   try {
     if (!json) return null;
-    // Non-streaming response
     const cand = json.candidates?.[0];
-    if (cand?.content?.parts) {
-      const part = cand.content.parts.find((p: any) => typeof p.text === 'string');
-      if (part?.text) return String(part.text);
+    if (cand?.content?.parts && Array.isArray(cand.content.parts)) {
+      const texts = cand.content.parts.filter((p: any) => typeof p.text === 'string').map((p: any) => String(p.text));
+      if (texts.length) return texts.join('\n');
     }
     // Some responses use safetyFeedback/promptFeedback only
     if (typeof json.text === 'string') return json.text;
@@ -236,11 +355,11 @@ function ensureSidebarStyles(): void {
   style.textContent = `
     #learnsphere-sidebar { position: fixed; top: 0; right: 0; height: 100%; width: 380px; max-width: 92vw; background: #ffffff; box-shadow: -2px 0 12px rgba(0,0,0,0.15); z-index: 2147483647; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Arial, sans-serif; }
     .ls-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #eee; }
-    .ls-header h2 { margin: 0; font-size: 16px; }
+    .ls-header h2 { margin: 0; font-size: 16px; color: #111827; }
     .ls-close { border: none; background: transparent; font-size: 18px; cursor: pointer; line-height: 1; padding: 4px 8px; }
     .ls-tabs { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #f1f1f1; }
-    .ls-tab { padding: 6px 10px; border-radius: 6px; border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer; font-size: 12px; }
-    .ls-tab.active { background: #e6f0ff; border-color: #bcd2ff; }
+    .ls-tab { padding: 6px 10px; border-radius: 6px; border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer; font-size: 12px; color: #111827; font-weight: 600; }
+    .ls-tab.active { background: #e6f0ff; border-color: #bcd2ff; color: #111827; }
     .ls-content { flex: 1; overflow: auto; padding: 12px; }
     .ls-footer { border-top: 1px solid #eee; padding: 8px 12px; }
     .ls-textarea { width: 100%; min-height: 70px; resize: vertical; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; }
@@ -572,6 +691,15 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       if (text && text.trim()) setPastedText(text.trim());
     });
 
+    // If viewer page injected a pasted image globally, consume it once
+    try {
+      const pending: Blob | undefined = (window as any).__ls_last_pasted_image;
+      if (pending) {
+        setPastedImage(pending);
+        (window as any).__ls_last_pasted_image = null;
+      }
+    } catch {}
+
     function setPastedImage(blob: Blob) {
       pendingPastedImage = blob; pendingPastedText = null; renderPreviewChip({ type: 'image', blob });
     }
@@ -614,35 +742,55 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       history.appendChild(thinking);
       history.scrollTop = history.scrollHeight;
       try {
-        const guidelines = 'Respond in clean Markdown with headings, bullet points, and numbered steps when helpful. Keep answers concise and scannable.';
-        const context = selection ? `\n\nContext (selected):\n${selection}` : '';
-        // Auto-create an anchor for current selection (no UI button)
-        let anchorSnippet = '';
+        const guidelines = 'Respond in clean Markdown with headings, bullet points, and numbered steps when helpful. Keep answers complete and scannable. If your response exceeds the token limit, you will continue seamlessly.';
+        // Determine selection fresh at send-time (turn-based), ignore stale selection
+        const selObj = window.getSelection();
+        let freshSelection = '';
         try {
-          const data = serializeSelectionToXPath();
-          if (data) {
-            const hash = btoa(unescape(encodeURIComponent(`${location.href}|${data.startXPath}|${data.startOffset}|${data.endXPath}|${data.endOffset}`))).slice(0, 64);
-            const anchorId = `a_${Date.now()}`;
-            await StorageService.saveAnchor({
-              url: location.href,
-              anchorId,
-              method: 'xpath',
-              serialized: { startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset },
-              snippet: data.snippet,
-              hash
-            } as any);
-            const range = restoreRangeFromXPath({ startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset });
-            if (range) highlightRange(range, anchorId);
-            anchorSnippet = `\n\nContext (anchor):\n${data.snippet}`;
+          if (selObj && selObj.rangeCount > 0) {
+            const container = selObj.getRangeAt(0).commonAncestorContainer as HTMLElement;
+            const insideUI = container && (container.closest('#learnsphere-sidebar') || container.closest('#learnsphere-selection-toolbar-host'));
+            if (!insideUI) freshSelection = (selObj.toString() || '').trim();
           }
         } catch {}
+        const imageFirst = !!pendingPastedImage;
+        // Prefer explicit selection passed when opening the sidebar for this turn; fall back to fresh selection
+        const effectiveSelection = selection && selection.trim() ? selection : freshSelection;
+        const context = imageFirst ? '' : (effectiveSelection ? `\n\nContext (selected):\n${effectiveSelection}` : '');
+        // Auto-create an anchor only if no image is attached (turn should respect latest modality)
+        let anchorSnippet = '';
+        if (!pendingPastedImage) {
+          try {
+            const data = serializeSelectionToXPath();
+            if (data) {
+              const hash = btoa(unescape(encodeURIComponent(`${location.href}|${data.startXPath}|${data.startOffset}|${data.endXPath}|${data.endOffset}`))).slice(0, 64);
+              const anchorId = `a_${Date.now()}`;
+              await StorageService.saveAnchor({
+                url: location.href,
+                anchorId,
+                method: 'xpath',
+                serialized: { startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset },
+                snippet: data.snippet,
+                hash
+              } as any);
+              const range = restoreRangeFromXPath({ startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset });
+              if (range) highlightRange(range, anchorId);
+              anchorSnippet = `\n\nContext (anchor):\n${data.snippet}`;
+            }
+          } catch {}
+        }
 
         let answer: string;
         if (pendingPastedImage || pendingPastedText) {
+          // Image-focused guidance when an image is present
+          const imageGuidance = pendingPastedImage
+            ? '\n\nYou are given a screenshot image that contains the question. Carefully read the text in the image (perform OCR if needed) and solve the exact question shown. Ignore unrelated page text. If any diagram/tables are present, interpret them. Show the final answer clearly.'
+            : '';
           // Keep preview visible until we have the answer; clear only after rendering
-          answer = await callGeminiMultimodal(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`, { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined });
+          answer = await callGeminiMultimodal(`${guidelines}${imageGuidance}\n\nQuestion: ${text || 'Solve the problem shown in the image.'}${context}${imageFirst ? '' : anchorSnippet}`,
+            { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined, allowContinue: true, maxOutputTokens: 2048 });
         } else {
-          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`);
+          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`, { allowContinue: true, maxOutputTokens: 2048 });
         }
         thinking.innerHTML = markdownToHtml(answer);
         // Jump-to-context removed for now
@@ -992,8 +1140,8 @@ function ensureSelectionToolbar(): { host: HTMLDivElement; shadow: ShadowRoot } 
   host.style.pointerEvents = 'none';
   document.documentElement.appendChild(host);
   const shadow = host.attachShadow({ mode: 'open' });
-  const style = document.createElement('style');
-  style.textContent = `
+      const style = document.createElement('style');
+      style.textContent = `
     .wrap { pointer-events: auto; background: rgba(17,24,39,.92); backdrop-filter: saturate(120%) blur(6px); color: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.35); padding: 6px; display: flex; gap: 4px; align-items: center; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; border: 1px solid rgba(59,130,246,.25); }
     button { all: unset; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; background: #111827; color: #e5e7eb; border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1; }
     button:hover { background: #1f2937; }

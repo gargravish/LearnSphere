@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LearnSphere PDF Viewer</title>
+    <link rel="stylesheet" href="./pdf_viewer.css" />
+    <style>
+      html, body, #app { height: 100%; margin: 0; }
+      #toolbar { display:flex; gap:8px; align-items:center; padding:8px; background:#111827; color:#e5e7eb; }
+      #viewerContainer { position:absolute; top:48px; bottom:0; left:0; right:0; overflow:auto; background:#1f2937; }
+      #viewer { position:relative; margin: 0 auto; padding: 12px 0; }
+      .page { position: relative; margin: 8px auto; box-shadow: 0 1px 4px rgba(0,0,0,.3); background:#111827; }
+      canvas { display:block; background:#111827; }
+      canvas { display: block; margin: 0 auto 8px; background: #111827; }
+      input[type="file"] { color:#e5e7eb; }
+      button { background:#2563eb; color:#fff; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; }
+      button:disabled { opacity:.5; cursor:default; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="toolbar">
+        <button id="open">Open PDF</button>
+        <button id="prev">Prev</button>
+        <span id="page">1 / 1</span>
+        <button id="next">Next</button>
+        <input id="file" type="file" accept="application/pdf" style="display:none" />
+      </div>
+      <div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div>
+    </div>
+    <!-- Load content features (sidebar, floating toolbar) directly in viewer page -->
+    <script src="./content.js"></script>
+  </body>
+</html>
+

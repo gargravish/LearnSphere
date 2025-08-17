@@ -11,7 +11,8 @@ module.exports = (env, argv) => {
       popup: './src/pages/popup/index.tsx',
       content: './src/content/index.ts',
       background: './src/background/index.ts',
-      options: './src/pages/options/index.tsx'
+      options: './src/pages/options/index.tsx',
+      viewer: './src/pages/viewer/index.ts'
     },
     output: {
       path: path.resolve(__dirname, 'dist'),
@@ -55,6 +56,11 @@ module.exports = (env, argv) => {
         filename: 'options.html',
         chunks: ['options']
       }),
+      new HtmlWebpackPlugin({
+        template: './src/pages/viewer/index.html',
+        filename: 'viewer.html',
+        chunks: ['viewer']
+      }),
       new CopyWebpackPlugin({
         patterns: [
           {
@@ -64,6 +70,27 @@ module.exports = (env, argv) => {
           {
             from: 'src/manifest.json',
             to: 'manifest.json'
+          },
+          {
+            from: 'node_modules/pdfjs-dist/build/pdf.min.mjs',
+            to: 'pdf.min.mjs'
+          },
+          {
+            from: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
+            to: 'pdf.worker.min.mjs'
+          }
+          ,
+          {
+            from: 'node_modules/pdfjs-dist/web/pdf_viewer.mjs',
+            to: 'pdf_viewer.mjs'
+          },
+          {
+            from: 'node_modules/pdfjs-dist/web/pdf_viewer.css',
+            to: 'pdf_viewer.css'
+          },
+          {
+            from: 'node_modules/pdfjs-dist/web/images',
+            to: 'images'
           }
         ]
       })

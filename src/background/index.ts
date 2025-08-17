@@ -7,6 +7,12 @@ chrome.runtime.onInstalled.addListener(() => {
   createContextMenus();
 });
 
+// Also recreate menus on browser startup to ensure latest contexts are present
+chrome.runtime.onStartup?.addListener(() => {
+  console.log('🚀 LearnSphere: Browser startup, (re)creating context menus');
+  createContextMenus();
+});
+
 // Create context menus
 function createContextMenus() {
   try {
@@ -49,6 +55,12 @@ function createContextMenus() {
               id: 'learnsphere-open-sidebar',
               parentId: 'learnsphere-main',
               title: '🚀 Open LearnSphere Sidebar',
+              contexts: ['all' as chrome.contextMenus.ContextType]
+            },
+            {
+              id: 'learnsphere-open-viewer',
+              parentId: 'learnsphere-main',
+              title: '📄 Open with LearnSphere Viewer',
               contexts: ['all' as chrome.contextMenus.ContextType]
             }
           ];
@@ -137,11 +149,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       return;
     }
     
-    // Check if this is a restricted URL
-    if (tabInfo.url?.startsWith('chrome://') || 
-        tabInfo.url?.startsWith('chrome-extension://') ||
-        tabInfo.url?.startsWith('edge://') ||
-        tabInfo.url?.startsWith('about:')) {
+    // Check if this is a restricted URL (allow our own extension pages like viewer.html)
+    const isExtensionUrl = tabInfo.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`);
+    if (!isExtensionUrl && (
+      tabInfo.url?.startsWith('chrome://') || 
+      tabInfo.url?.startsWith('chrome-extension://') ||
+      tabInfo.url?.startsWith('edge://') ||
+      tabInfo.url?.startsWith('about:')
+    )) {
       console.error('🚀 LearnSphere: Cannot inject content script on restricted page:', tabInfo.url);
       return;
     }
@@ -150,8 +165,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       console.warn('🚀 LearnSphere: Page is a local file. Ensure "Allow access to file URLs" is enabled for this extension.');
     }
     
-    // Ensure content script is loaded
-    const scriptLoaded = await ensureContentScript(targetTabId);
+    // Ensure content script is loaded (skip explicit injection on our viewer since it’s already included)
+    const onViewer = isExtensionUrl && /\/viewer\.html/i.test(tabInfo.url || '');
+    const scriptLoaded = onViewer ? true : await ensureContentScript(targetTabId);
     if (!scriptLoaded) {
       console.error('🚀 LearnSphere: Could not load content script');
       return;
@@ -221,6 +237,27 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           console.error('🚀 LearnSphere: Failed to send open sidebar message:', error);
         }
         break;
+      case 'learnsphere-open-viewer': {
+        try {
+          let fileParam = '';
+          // If user clicked a PDF link
+          if (info.linkUrl && /\.pdf($|\?)/i.test(info.linkUrl)) {
+            fileParam = encodeURIComponent(info.linkUrl);
+          }
+          // If current tab is showing a PDF (http/https/file)
+          else if (tabInfo.url && /\.pdf($|\?)/i.test(tabInfo.url)) {
+            // Avoid passing file:// directly which cannot be fetched; let the viewer prompt to use file picker
+            if (!tabInfo.url.startsWith('file://')) {
+              fileParam = encodeURIComponent(tabInfo.url);
+            }
+          }
+          const url = fileParam ? `viewer.html?file=${fileParam}` : 'viewer.html';
+          await chrome.tabs.create({ url });
+        } catch (e) {
+          console.error('🚀 LearnSphere: Failed to open viewer', e);
+        }
+        break;
+      }
         
       default:
         console.log('🚀 LearnSphere: Unknown context menu action:', info.menuItemId);

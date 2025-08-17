@@ -37,7 +37,7 @@
   
   "web_accessible_resources": [
     {
-      "resources": ["popup.html", "popup.js", "popup.css"],
+      "resources": ["popup.html", "popup.js", "popup.css", "viewer.html", "viewer.js", "pdf.min.mjs", "pdf.worker.min.mjs", "pdf_viewer.mjs", "pdf_viewer.css", "images/*"],
       "matches": ["<all_urls>"]
     }
   ],
