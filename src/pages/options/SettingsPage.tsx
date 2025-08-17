@@ -29,9 +29,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
     }
   };
 
-  const loadSettingsSummary = () => {
+  const loadSettingsSummary = async () => {
     try {
       const summary = settingsService.getSettingsSummary();
+      try {
+        if (!summary.criticalSettings || summary.criticalSettings.length > 0) {
+          const sync = await chrome.storage.sync.get('learnsphere_settings');
+          const local = await chrome.storage.local.get('learnsphere_settings');
+          const hasKey = !!(sync?.learnsphere_settings?.geminiApiKey || local?.learnsphere_settings?.geminiApiKey);
+          if (hasKey && Array.isArray(summary.criticalSettings)) {
+            summary.criticalSettings = summary.criticalSettings.filter((s: string) => !s.includes('Gemini API Key'));
+          }
+        }
+      } catch {}
       setSettingsSummary(summary);
     } catch (error) {
       console.error('Failed to load settings summary:', error);

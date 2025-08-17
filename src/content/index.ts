@@ -1,4 +1,5 @@
 console.log('🚀 LearnSphere: Content script initializing...');
+import { QuizPersistenceService } from '@/services/QuizPersistenceService';
 
 // Minimal Gemini integration (no external imports)
 let geminiApiKey: string | null = null;
@@ -296,7 +297,15 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
     btn.addEventListener('click', async () => {
       try {
         const base = selection || window.getSelection()?.toString() || document.title;
-        const prompt = `Return ONLY valid JSON (no markdown fences, no extra text): an array of 5 objects with fields 
+        // Read preferred question count from synced settings
+        let preferredCount = 5;
+        try {
+          const sync = await chrome.storage.sync.get('learnsphere_settings');
+          const cfg = sync?.learnsphere_settings;
+          if (cfg?.defaultQuizQuestionCount) preferredCount = Number(cfg.defaultQuizQuestionCount);
+        } catch {}
+
+        const prompt = `Return ONLY valid JSON (no markdown fences, no extra text): an array of ${preferredCount} objects with fields 
 {"question": string, "options": [string,string,string,string], "correctAnswer": number (0-3), "explanation": string} 
 based on this text: \n${base}`;
         out.textContent = 'Generating…';
@@ -309,6 +318,12 @@ based on this text: \n${base}`;
         // Render interactive quiz
         out.innerHTML = '';
         renderInteractiveQuiz(out, questions);
+        // Add Save Result button (modular, does nothing if user doesn't click)
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'ls-button';
+        saveBtn.textContent = 'Save Result';
+        saveBtn.addEventListener('click', () => saveCurrentQuiz(out, questions));
+        out.appendChild(document.createElement('div')).appendChild(saveBtn);
       } catch (e) {
         out.innerHTML = markdownToHtml(`**Error:** ${(e as Error).message}`);
       }
@@ -356,6 +371,10 @@ function tryParseQuizJSON(text: string): QuizQuestion[] | null {
 }
 
 function renderInteractiveQuiz(container: HTMLElement, questions: QuizQuestion[]): void {
+  // Create a stable group id so we can read selections later
+  const groupId = String(Date.now());
+  container.setAttribute('data-quiz-group', groupId);
+
   questions.forEach((q, idx) => {
     const qWrap = document.createElement('div');
     qWrap.className = 'ls-quiz-q';
@@ -367,7 +386,7 @@ function renderInteractiveQuiz(container: HTMLElement, questions: QuizQuestion[]
     const optionsWrap = document.createElement('div');
     optionsWrap.className = 'ls-quiz-options';
 
-    const name = `lsq-${Date.now()}-${idx}`;
+    const name = `lsq-${groupId}-${idx}`;
     q.options.forEach((opt, i) => {
       const label = document.createElement('label');
       label.className = 'ls-quiz-option';
@@ -405,6 +424,36 @@ function renderInteractiveQuiz(container: HTMLElement, questions: QuizQuestion[]
     qWrap.append(optionsWrap, result);
     container.appendChild(qWrap);
   });
+}
+
+function collectSelections(container: HTMLElement, questions: QuizQuestion[]): number[] {
+  const groupId = container.getAttribute('data-quiz-group') || '';
+  return questions.map((_q, idx) => {
+    const selector = `input[name="lsq-${groupId}-${idx}"]`;
+    const inputs = container.querySelectorAll(selector) as NodeListOf<HTMLInputElement>;
+    const checked = Array.from(inputs).find(i => i.checked);
+    return checked ? Number(checked.value) : -1;
+  });
+}
+
+async function saveCurrentQuiz(container: HTMLElement, questions: QuizQuestion[]) {
+  try {
+    const selections = collectSelections(container, questions);
+    const complete = selections.every(i => i >= 0);
+    if (!complete) {
+      container.appendChild(makeMessage('assistant', '**Please answer all questions before saving.**'));
+      return;
+    }
+    const result = await QuizPersistenceService.saveResult({
+      questions,
+      selections,
+      sourceUrl: location.href,
+      documentTitle: document.title
+    });
+    container.appendChild(makeMessage('assistant', `**Saved.** Score: ${result.correctCount}/${result.totalQuestions} (${result.percentage}%).`));
+  } catch (e) {
+    container.appendChild(makeMessage('assistant', `**Save failed:** ${(e as Error).message}`));
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

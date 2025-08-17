@@ -68,10 +68,16 @@ module.exports = (env, argv) => {
       })
     ],
     devtool: isProduction ? false : 'cheap-module-source-map',
+    // For Chrome extensions, keep each entrypoint as a single file to
+    // avoid runtime chunk loading issues in content scripts.
     optimization: {
       splitChunks: {
-        chunks: 'all'
-      }
+        cacheGroups: {
+          default: false,
+          vendors: false
+        }
+      },
+      runtimeChunk: false
     }
   };
 };

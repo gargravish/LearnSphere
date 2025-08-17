@@ -337,38 +337,7 @@ const Popup: React.FC = () => {
     }
   };
 
-  const debugStorage = async () => {
-    console.log('LearnSphere Popup: Debugging storage...');
-    try {
-      const allItems = await chrome.storage.local.get(null);
-      console.log('LearnSphere Popup: All items in storage:', allItems);
-      setMessage('Debugged storage. Check console for details.');
-      setTimeout(() => setMessage(''), 5000);
-    } catch (error) {
-      console.error('LearnSphere Popup: Error debugging storage:', error);
-      setMessage('Failed to debug storage. Please check console.');
-      setTimeout(() => setMessage(''), 5000);
-    }
-  };
-
-  const testServiceWorker = async () => {
-    try {
-      console.log('LearnSphere: Testing service worker...');
-      const response = await chrome.runtime.sendMessage({ action: 'testServiceWorker' });
-      console.log('LearnSphere: Service worker response:', response);
-      
-      if (response && response.success) {
-        setMessage(`✅ Service worker is working! ${response.message}`);
-      } else {
-        setMessage('❌ Service worker test failed');
-      }
-    } catch (error) {
-      console.error('LearnSphere: Service worker test failed:', error);
-      setMessage('❌ Service worker test failed - check console for details');
-    }
-    
-    setTimeout(() => setMessage(''), 5000);
-  };
+  // Debug actions removed per request to keep popup clean
 
   return (
     <div className="popup">
@@ -489,15 +458,7 @@ const Popup: React.FC = () => {
               </button>
             </>
           )}
-          <button onClick={debugStorage} className="debug-button">
-            Debug Storage
-          </button>
-          <button onClick={handleManualInject} className="debug-button">
-            Inject Content Script
-          </button>
-          <button onClick={testServiceWorker} className="debug-button">
-            Test Service Worker
-          </button>
+          {/* Removed debug buttons to simplify UI */}
         </div>
       </div>
 
