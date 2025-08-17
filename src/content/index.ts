@@ -74,7 +74,12 @@ async function callGemini(prompt: string): Promise<string> {
         throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
       }
       const data = await res.json();
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+      const text = extractGeminiText(data);
+      if (text) return text;
+      if (data?.promptFeedback?.blockReason) {
+        return `Response blocked (${String(data.promptFeedback.blockReason)}). Try rephrasing or lowering safety.`;
+      }
+      return '(No response)';
     } catch (e) {
       lastError = e;
       attempt += 1;
@@ -109,10 +114,16 @@ async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; p
   });
   if (!res.ok) {
     const errText = await res.text();
+    console.error('Gemini multimodal error', res.status, res.statusText, errText);
     throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
   }
   const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+  const text = extractGeminiText(data);
+  if (text) return text;
+  if (data?.promptFeedback?.blockReason) {
+    return `Response blocked (${String(data.promptFeedback.blockReason)}). Try rephrasing or cropping the image.`;
+  }
+  return '(No response)';
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -150,6 +161,24 @@ function inlineFormat(s: string): string {
     return `<a href="${href}" target="_blank" rel="noopener">${m}</a>`;
   });
   return out;
+}
+
+// Robustly extract text from Gemini responses (v1beta may stream parts)
+function extractGeminiText(json: any): string | null {
+  try {
+    if (!json) return null;
+    // Non-streaming response
+    const cand = json.candidates?.[0];
+    if (cand?.content?.parts) {
+      const part = cand.content.parts.find((p: any) => typeof p.text === 'string');
+      if (part?.text) return String(part.text);
+    }
+    // Some responses use safetyFeedback/promptFeedback only
+    if (typeof json.text === 'string') return json.text;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function markdownToHtml(md: string): string {
@@ -610,6 +639,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
 
         let answer: string;
         if (pendingPastedImage || pendingPastedText) {
+          // Keep preview visible until we have the answer; clear only after rendering
           answer = await callGeminiMultimodal(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`, { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined });
         } else {
           answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`);
@@ -617,7 +647,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         thinking.innerHTML = markdownToHtml(answer);
         // Jump-to-context removed for now
         try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
-        // Clear preview after send
+        // Clear preview after rendering the answer to avoid flicker/disappearing before reply
         pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = '';
       } catch (e) {
         const msg = (e as Error).message || 'Unknown error';

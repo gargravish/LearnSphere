@@ -145,6 +145,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       console.error('🚀 LearnSphere: Cannot inject content script on restricted page:', tabInfo.url);
       return;
     }
+    // If it's a file:// URL, ensure "Allow access to file URLs" is enabled, otherwise content scripts cannot run
+    if (tabInfo.url?.startsWith('file://')) {
+      console.warn('🚀 LearnSphere: Page is a local file. Ensure "Allow access to file URLs" is enabled for this extension.');
+    }
     
     // Ensure content script is loaded
     const scriptLoaded = await ensureContentScript(targetTabId);
