@@ -66,4 +66,43 @@ export interface RevisionPlan {
   items: RevisionPlanItem[];
 }
 
+// --- Anchors / Selections ---
+export type AnchorMethod = 'xpath';
+
+export interface SerializedRangeXPath {
+  startXPath: string;
+  startOffset: number;
+  endXPath: string;
+  endOffset: number;
+}
+
+export interface AnchorRecord {
+  id?: number;
+  url: string;
+  anchorId: string; // stable id
+  method: AnchorMethod; // currently 'xpath'
+  serialized: SerializedRangeXPath; // serialization payload
+  snippet: string; // short text for context
+  hash: string; // dedupe key
+  createdAt: number; // epoch ms
+  kind?: 'text' | 'image';
+  imageMeta?: {
+    src: string;
+    alt?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    rect?: { x: number; y: number; width: number; height: number };
+  };
+}
+
+// --- Page cache (offline content) ---
+export interface PageContentCache {
+  id?: number;
+  url: string;
+  title?: string;
+  text: string; // extracted main text (trimmed)
+  updatedAt: number; // epoch ms
+  contentHash?: string; // optional hash for change detection
+}
+
 

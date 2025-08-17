@@ -1,10 +1,11 @@
 console.log('🚀 LearnSphere: Content script initializing...');
 import { QuizPersistenceService } from '@/services/QuizPersistenceService';
 import { StorageService } from '@/services/StorageService';
+import { ContentExtractionService } from '@/services/ContentExtractionService';
 
 // Minimal Gemini integration (no external imports)
 let geminiApiKey: string | null = null;
-const GEMINI_MODEL = 'gemini-1.5-flash';
+let GEMINI_MODEL = 'gemini-2.5-flash';
 
 async function loadGeminiKey(): Promise<string | null> {
   try {
@@ -15,6 +16,9 @@ async function loadGeminiKey(): Promise<string | null> {
       const result = await (chrome?.storage?.sync?.get?.('learnsphere_settings') ?? Promise.resolve(null));
       if (result && result.learnsphere_settings) {
         key = result.learnsphere_settings.geminiApiKey || null;
+        if (result.learnsphere_settings.geminiModel) {
+          GEMINI_MODEL = result.learnsphere_settings.geminiModel;
+        }
       }
     } catch {}
     if (!key) {
@@ -23,6 +27,9 @@ async function loadGeminiKey(): Promise<string | null> {
         const local = await (chrome?.storage?.local?.get?.('learnsphere_settings') ?? Promise.resolve(null));
         if (local && local.learnsphere_settings) {
           key = local.learnsphere_settings.geminiApiKey || null;
+          if (local.learnsphere_settings.geminiModel) {
+            GEMINI_MODEL = local.learnsphere_settings.geminiModel;
+          }
         }
       } catch {}
     }
@@ -91,6 +98,9 @@ async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; p
   if (opts?.imageBlob) {
     const base64 = await blobToBase64(opts.imageBlob);
     parts.push({ inlineData: { mimeType: opts.imageBlob.type || 'image/png', data: base64 } });
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('You appear to be offline. Please check your internet connection.');
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -238,6 +248,125 @@ function ensureSidebarStyles(): void {
   document.head.appendChild(style);
 }
 
+// --- Selection serialization (XPath-based) ---
+function getXPath(node: Node): string {
+  if (node.nodeType === Node.DOCUMENT_NODE) return '/';
+  const parent = node.parentNode;
+  if (!parent) return '/';
+  const siblings = Array.from(parent.childNodes).filter(n => n.nodeName === node.nodeName) as Node[];
+  const index = siblings.findIndex(n => n === node) + 1;
+  return `${getXPath(parent)}/${node.nodeName}[${index}]`;
+}
+
+function serializeSelectionToXPath(): { startXPath: string; startOffset: number; endXPath: string; endOffset: number; snippet: string } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  const snippet = range.toString().slice(0, 200);
+  return {
+    startXPath: getXPath(range.startContainer),
+    startOffset: range.startOffset,
+    endXPath: getXPath(range.endContainer),
+    endOffset: range.endOffset,
+    snippet
+  };
+}
+
+function nodeFromXPath(xpath: string): Node | null {
+  try {
+    const res = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+    return res.singleNodeValue as Node | null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreRangeFromXPath(serialized: { startXPath: string; startOffset: number; endXPath: string; endOffset: number }): Range | null {
+  const start = nodeFromXPath(serialized.startXPath);
+  const end = nodeFromXPath(serialized.endXPath);
+  if (!start || !end) return null;
+  const r = document.createRange();
+  try {
+    r.setStart(start, Math.min(serialized.startOffset, (start.textContent || '').length));
+    r.setEnd(end, Math.min(serialized.endOffset, (end.textContent || '').length));
+    return r;
+  } catch {
+    return null;
+  }
+}
+
+function highlightRange(range: Range, anchorId?: string): void {
+  const mark = document.createElement('mark');
+  mark.style.background = '#fff3b0';
+  mark.style.padding = '0 2px';
+  if (anchorId) {
+    mark.id = anchorId;
+    mark.setAttribute('data-ls-anchor', anchorId);
+  }
+  const contents = range.extractContents();
+  mark.appendChild(contents);
+  range.insertNode(mark);
+}
+
+async function scrollToAnchor(anchorId: string): Promise<void> {
+  let el = document.getElementById(anchorId) as HTMLElement | null;
+  if (!el) {
+    el = document.querySelector(`mark[data-ls-anchor="${anchorId}"]`) as HTMLElement | null;
+  }
+  if (!el) {
+    try {
+      const anchors = await StorageService.getAnchors(location.href);
+      const rec = anchors.find(a => (a as any).anchorId === anchorId);
+      if (rec && (rec as any).kind !== 'image' && (rec as any).serialized) {
+        const r = restoreRangeFromXPath(((rec as any).serialized) as any);
+        if (r) {
+          highlightRange(r, anchorId);
+          el = document.getElementById(anchorId) as HTMLElement | null;
+        }
+      } else if (rec && (rec as any).kind === 'image' && (rec as any).imageMeta?.src) {
+        const candidate = document.querySelector(`img[src="${CSS.escape((rec as any).imageMeta.src)}"]`) as HTMLElement | null;
+        if (candidate) {
+          el = candidate;
+        }
+      } else if (rec && (rec as any).snippet) {
+        // Fallback: try to locate by text snippet
+        const r = createRangeFromSnippet((rec as any).snippet as string);
+        if (r) {
+          highlightRange(r, anchorId);
+          el = document.getElementById(anchorId) as HTMLElement | null;
+        }
+      }
+    } catch {}
+  }
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    (el as HTMLElement).style.transition = 'background-color 0.6s';
+    const old = (el as HTMLElement).style.background;
+    (el as HTMLElement).style.background = '#fde68a';
+    setTimeout(() => { (el as HTMLElement).style.background = old || '#fff3b0'; }, 800);
+  }
+}
+
+function createRangeFromSnippet(snippet: string): Range | null {
+  const text = snippet.trim();
+  if (!text) return null;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    const idx = (node.textContent || '').indexOf(text);
+    if (idx !== -1) {
+      const r = document.createRange();
+      try {
+        r.setStart(node, idx);
+        r.setEnd(node, idx + text.length);
+        return r;
+      } catch { return null; }
+    }
+    node = walker.nextNode();
+  }
+  return null;
+}
+
 function removeExistingSidebar(): void {
   const existing = document.getElementById('learnsphere-sidebar');
   if (existing) existing.remove();
@@ -321,6 +450,51 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
 
     const ta = document.createElement('textarea');
     ta.id = 'ls-chat-input';
+    // Save anchor button
+    const saveAnchorBtn = document.createElement('button');
+    saveAnchorBtn.className = 'ls-button';
+    saveAnchorBtn.textContent = 'Save Anchor';
+    saveAnchorBtn.addEventListener('click', async () => {
+      try {
+        // Prefer text selection; if none, check if an image is in focus/nearby
+        const sel = window.getSelection();
+        let data = serializeSelectionToXPath();
+        let usedImage = false;
+        let imageMeta: any = null;
+        if (!data && sel && sel.rangeCount > 0) {
+          const r = sel.getRangeAt(0);
+          const node = (r.commonAncestorContainer as HTMLElement);
+          const img = (node && (node.nodeType === 1 ? node.closest('img') : node.parentElement?.closest('img'))) as HTMLImageElement | null;
+          if (img) {
+            const rect = img.getBoundingClientRect();
+            imageMeta = { src: img.currentSrc || img.src, alt: img.alt || undefined, naturalWidth: img.naturalWidth || undefined, naturalHeight: img.naturalHeight || undefined, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+            usedImage = true;
+          }
+        }
+        if (!data && !usedImage) { showErrorChip('No selection to anchor.'); return; }
+        const hash = btoa(unescape(encodeURIComponent(`${location.href}|${data?.startXPath}|${data?.startOffset}|${data?.endXPath}|${data?.endOffset}`))).slice(0, 64);
+        const anchorId = `a_${Date.now()}`;
+        await StorageService.saveAnchor({
+          url: location.href,
+          anchorId,
+          method: 'xpath',
+          serialized: { startXPath: data?.startXPath || '', startOffset: data?.startOffset || 0, endXPath: data?.endXPath || '', endOffset: data?.endOffset || 0 },
+          snippet: usedImage ? (imageMeta?.alt || 'Image') : (data?.snippet || ''),
+          hash,
+          kind: usedImage ? 'image' : 'text',
+          imageMeta: usedImage ? imageMeta : undefined
+        } as any);
+        // Immediately highlight text anchors
+        if (data) {
+          const range = restoreRangeFromXPath({ startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset });
+          if (range) highlightRange(range, anchorId);
+        }
+        const msg = makeMessage('assistant', `Saved anchor for this selection.`);
+        history.appendChild(msg);
+      } catch (e) {
+        showErrorChip((e as Error).message);
+      }
+    });
     ta.placeholder = 'Type your question…';
     ta.className = 'ls-textarea';
 
@@ -413,13 +587,35 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       try {
         const guidelines = 'Respond in clean Markdown with headings, bullet points, and numbered steps when helpful. Keep answers concise and scannable.';
         const context = selection ? `\n\nContext (selected):\n${selection}` : '';
+        // Auto-create an anchor for current selection (no UI button)
+        let anchorSnippet = '';
+        try {
+          const data = serializeSelectionToXPath();
+          if (data) {
+            const hash = btoa(unescape(encodeURIComponent(`${location.href}|${data.startXPath}|${data.startOffset}|${data.endXPath}|${data.endOffset}`))).slice(0, 64);
+            const anchorId = `a_${Date.now()}`;
+            await StorageService.saveAnchor({
+              url: location.href,
+              anchorId,
+              method: 'xpath',
+              serialized: { startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset },
+              snippet: data.snippet,
+              hash
+            } as any);
+            const range = restoreRangeFromXPath({ startXPath: data.startXPath, startOffset: data.startOffset, endXPath: data.endXPath, endOffset: data.endOffset });
+            if (range) highlightRange(range, anchorId);
+            anchorSnippet = `\n\nContext (anchor):\n${data.snippet}`;
+          }
+        } catch {}
+
         let answer: string;
         if (pendingPastedImage || pendingPastedText) {
-          answer = await callGeminiMultimodal(`${guidelines}\n\nQuestion: ${text}${context}`, { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined });
+          answer = await callGeminiMultimodal(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`, { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined });
         } else {
-          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}`);
+          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`);
         }
         thinking.innerHTML = markdownToHtml(answer);
+        // Jump-to-context removed for now
         try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
         // Clear preview after send
         pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = '';
@@ -444,6 +640,23 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
     btnRow.appendChild(pasteBtn);
 
     footer.append(ta, btnRow);
+
+    // Offline indicator
+    const net = document.createElement('div');
+    net.style.cssText = 'margin-top:6px;font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;';
+    const dot = document.createElement('span');
+    dot.style.cssText = 'width:8px;height:8px;border-radius:9999px;display:inline-block;background:#10b981;';
+    const label = document.createElement('span');
+    function updateNet() {
+      const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+      dot.style.background = offline ? '#9ca3af' : '#10b981';
+      label.textContent = offline ? 'Offline: AI disabled, using cached content when available' : 'Online';
+    }
+    updateNet();
+    window.addEventListener('online', updateNet);
+    window.addEventListener('offline', updateNet);
+    net.append(dot, label);
+    footer.appendChild(net);
   }
 
   if (type === 'summary') {
@@ -463,6 +676,17 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
     btn.textContent = 'Generate Summary';
     btn.addEventListener('click', async () => {
       try {
+        // Offline fallback: if offline, show cached snippet instead of calling AI
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          const cache = await StorageService.getPageCache(location.href);
+          if (cache && cache.text) {
+            const snippet = extractOfflineSnippet(cache.text, selection, '');
+            out.innerHTML = markdownToHtml(`**Offline fallback (no AI)**\n\n${snippet}`);
+          } else {
+            out.innerHTML = markdownToHtml('**Offline**: No cached content available for this page. Try again when online.');
+          }
+          return;
+        }
         const base = selection || window.getSelection()?.toString() || document.title;
         const prompt = `Summarize the following text using Markdown. Include a short title, key bullet points, and a brief takeaway section.\n\n${base}`;
         out.innerHTML = `<span class="ls-spinner"></span>Generating…`;
@@ -532,6 +756,28 @@ based on this text: \n${base}`;
 
   root.append(header, tabs, content, footer);
   document.body.appendChild(root);
+  // Cache page content for offline mode
+  (async () => {
+    try {
+      const extracted = ContentExtractionService.extractFromCurrentPage();
+      if (extracted.text && extracted.text.length >= 200) {
+        await StorageService.savePageCache({ url: location.href, title: document.title || extracted.title, text: extracted.text });
+      }
+    } catch {}
+  })();
+
+  // Re-highlight saved anchors for this URL (still useful without explicit UI buttons)
+  (async () => {
+    try {
+      const anchors = await StorageService.getAnchors(location.href);
+      anchors.forEach(a => {
+        if (a.method === 'xpath') {
+          const r = restoreRangeFromXPath(a.serialized as any);
+          if (r) highlightRange(r, a.anchorId as any);
+        }
+      });
+    } catch {}
+  })();
 }
 
 function makeMessage(role: 'user' | 'assistant', text: string): HTMLElement {
@@ -625,6 +871,20 @@ function renderInteractiveQuiz(container: HTMLElement, questions: QuizQuestion[]
   });
 }
 
+// Extract a reasonable offline snippet from cached page text
+function extractOfflineSnippet(cached: string, selection: string | undefined, query: string): string {
+  const base = (selection && selection.trim()) || query || '';
+  if (!cached) return 'No cached text.';
+  if (!base) return cached.slice(0, 1000) + (cached.length > 1000 ? '…' : '');
+  const idx = cached.toLowerCase().indexOf(base.toLowerCase().slice(0, Math.min(32, base.length)));
+  if (idx === -1) {
+    return cached.slice(0, 1000) + (cached.length > 1000 ? '…' : '');
+  }
+  const start = Math.max(0, idx - 300);
+  const end = Math.min(cached.length, idx + Math.max(300, base.length + 300));
+  return cached.slice(start, end);
+}
+
 function collectSelections(container: HTMLElement, questions: QuizQuestion[]): number[] {
   const groupId = container.getAttribute('data-quiz-group') || '';
   return questions.map((_q, idx) => {
@@ -685,3 +945,119 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 console.log('🚀 LearnSphere: Content script ready.');
+
+// --- Floating selection toolbar (Ask / Summarize / Quiz) ---
+let lsSelectionToolbarHost: HTMLDivElement | null = null;
+let lsSelectionToolbarShadow: ShadowRoot | null = null;
+let lsSelectionToolbarVisible = false;
+
+function ensureSelectionToolbar(): { host: HTMLDivElement; shadow: ShadowRoot } {
+  if (lsSelectionToolbarHost && lsSelectionToolbarShadow) return { host: lsSelectionToolbarHost, shadow: lsSelectionToolbarShadow };
+  const host = document.createElement('div');
+  host.id = 'learnsphere-selection-toolbar-host';
+  host.style.position = 'fixed';
+  host.style.top = '0';
+  host.style.left = '0';
+  host.style.zIndex = '2147483647';
+  host.style.pointerEvents = 'none';
+  document.documentElement.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = `
+    .wrap { pointer-events: auto; background: rgba(17,24,39,.92); backdrop-filter: saturate(120%) blur(6px); color: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.35); padding: 6px; display: flex; gap: 4px; align-items: center; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; border: 1px solid rgba(59,130,246,.25); }
+    button { all: unset; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; background: #111827; color: #e5e7eb; border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1; }
+    button:hover { background: #1f2937; }
+    .tooltip { position: absolute; bottom: 100%; transform: translateY(-6px); background:#111827; color:#e5e7eb; padding:2px 6px; font-size:11px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .12s ease; }
+    button:hover .tooltip { opacity: 1; }
+  `;
+  shadow.appendChild(style);
+  const wrap = document.createElement('div');
+  wrap.className = 'wrap';
+  const ask = document.createElement('button'); ask.innerHTML = '<span>💬</span><span class="tooltip">Ask</span>';
+  const sum = document.createElement('button'); sum.innerHTML = '<span>📝</span><span class="tooltip">Summarize</span>';
+  const quiz = document.createElement('button'); quiz.innerHTML = '<span>🧠</span><span class="tooltip">Quiz</span>';
+  wrap.append(ask, sum, quiz);
+  shadow.appendChild(wrap);
+
+  // Button handlers set at show time to capture current selection text
+  (ask as any)._handler = null;
+  (sum as any)._handler = null;
+  (quiz as any)._handler = null;
+
+  lsSelectionToolbarHost = host;
+  lsSelectionToolbarShadow = shadow;
+  return { host, shadow };
+}
+
+function hideSelectionToolbar() {
+  if (!lsSelectionToolbarHost) return;
+  lsSelectionToolbarHost.style.transform = 'translate(-9999px, -9999px)';
+  lsSelectionToolbarVisible = false;
+}
+
+function showSelectionToolbarForSelection() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionToolbar(); return; }
+    const range = sel.getRangeAt(0);
+    // Ignore selections inside our own UI
+    const container = range.commonAncestorContainer as HTMLElement;
+    if (container && (container.closest('#learnsphere-sidebar') || container.closest('#learnsphere-selection-toolbar-host'))) {
+      hideSelectionToolbar();
+      return;
+    }
+    const text = (sel.toString() || '').trim();
+    if (!text || text.length < 2) { hideSelectionToolbar(); return; }
+    const rects = range.getClientRects();
+    const rect = rects.length ? rects[0] : range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) { hideSelectionToolbar(); return; }
+
+    const { host, shadow } = ensureSelectionToolbar();
+    const wrap = shadow.querySelector('.wrap') as HTMLDivElement;
+    const [ask, sum, quiz] = Array.from(wrap.querySelectorAll('button')) as HTMLButtonElement[];
+    // Reset existing listeners
+    if ((ask as any)._handler) ask.removeEventListener('click', (ask as any)._handler);
+    if ((sum as any)._handler) sum.removeEventListener('click', (sum as any)._handler);
+    if ((quiz as any)._handler) quiz.removeEventListener('click', (quiz as any)._handler);
+    // New listeners capturing current selection text
+    const onAsk = () => { createSidebar('chat', text); hideSelectionToolbar(); };
+    const onSum = () => { createSidebar('summary', text); hideSelectionToolbar(); };
+    const onQuiz = () => { createSidebar('quiz', text); hideSelectionToolbar(); };
+    ask.addEventListener('click', onAsk); (ask as any)._handler = onAsk;
+    sum.addEventListener('click', onSum); (sum as any)._handler = onSum;
+    quiz.addEventListener('click', onQuiz); (quiz as any)._handler = onQuiz;
+
+    // Positioning (fixed coordinates)
+    const padding = 8;
+    const desiredLeft = Math.max(8, Math.min(rect.left + rect.width / 2, window.innerWidth - 8));
+    // measure width to center
+    wrap.style.visibility = 'hidden';
+    host.style.transform = `translate(${Math.round(desiredLeft)}px, ${Math.round(rect.top + rect.height + padding)}px)`;
+    wrap.getBoundingClientRect();
+    wrap.style.visibility = 'visible';
+    const w = wrap.getBoundingClientRect().width;
+    const left = Math.max(8, Math.min(desiredLeft - w / 2, window.innerWidth - w - 8));
+    host.style.transform = `translate(${Math.round(left)}px, ${Math.round(rect.top + rect.height + padding)}px)`;
+    lsSelectionToolbarVisible = true;
+  } catch {
+    hideSelectionToolbar();
+  }
+}
+
+function handleGlobalMouseUp() { setTimeout(showSelectionToolbarForSelection, 0); }
+function handleGlobalKeyUp(e: KeyboardEvent) {
+  if (e.key === 'Escape') { hideSelectionToolbar(); try { const sel = window.getSelection(); sel?.removeAllRanges(); } catch {} return; }
+  setTimeout(showSelectionToolbarForSelection, 0);
+}
+function handleGlobalScroll() { if (lsSelectionToolbarVisible) showSelectionToolbarForSelection(); }
+function handleDocClick(e: MouseEvent) {
+  // Hide when clicking outside toolbar
+  const path = (e.composedPath && e.composedPath()) || [];
+  const inside = path.some((n: any) => n === lsSelectionToolbarHost || (n instanceof HTMLElement && n.id === 'learnsphere-sidebar'));
+  if (!inside) hideSelectionToolbar();
+}
+
+document.addEventListener('mouseup', handleGlobalMouseUp);
+document.addEventListener('keyup', handleGlobalKeyUp);
+document.addEventListener('scroll', handleGlobalScroll, true);
+document.addEventListener('mousedown', handleDocClick, true);

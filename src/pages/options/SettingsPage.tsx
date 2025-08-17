@@ -278,6 +278,41 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
       </div>
 
       <div className="setting-group">
+        <label>Gemini Model</label>
+        <select
+          value={settings.geminiModel || 'gemini-2.5-flash'}
+          onChange={(e) => handleSettingChange('geminiModel' as any, e.target.value)}
+        >
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash (default)</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+        </select>
+        <p className="setting-description">Choose the Gemini model. Flash is fastest and most affordable; Pro offers higher quality. 1.5 models are deprecated.</p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="test-api-button"
+            onClick={async () => {
+              if (settings.geminiApiKey) {
+                setIsLoading(true);
+                try {
+                  const result = await settingsService.testApiKey(settings.geminiApiKey);
+                  setMessage(result.valid ? 'Model/API key test passed' : `Test failed: ${result.error}`);
+                } catch (error) {
+                  setMessage('Failed to test model');
+                } finally {
+                  setIsLoading(false);
+                  setTimeout(() => setMessage(''), 5000);
+                }
+              }
+            }}
+            disabled={!settings.geminiApiKey || isLoading}
+          >
+            Test Model
+          </button>
+        </div>
+      </div>
+
+      <div className="setting-group">
         <label>Max Tokens</label>
         <input
           type="number"

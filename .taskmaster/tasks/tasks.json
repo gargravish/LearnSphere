@@ -242,16 +242,89 @@
       },
       {
         "id": 17,
-        "title": "PDF Viewer Integration and Multimodal Rendering",
-        "description": "Integrate PDF.js to render PDFs within the extension, preserving layout and multimodal elements (text, diagrams, charts, equations).",
-        "details": "Implement PDF.js viewer component in React. Ensure accurate rendering of PDFs from both web URLs and local files. Support OCR for scanned documents and maintain multimodal fidelity. Provide hooks for selection and annotation.",
-        "testStrategy": "Open sample PDFs (including complex layouts) and verify rendering accuracy. Test OCR fallback for scanned documents. Validate selection and annotation capabilities.",
-        "priority": "high",
+        "title": "Universal Content Extraction & Anchoring (with optional PDF.js fallback)",
+        "description": "Provide robust content extraction and stable anchoring on any web page (HTML), with optional, lazy-loaded PDF.js fallback only when encountering PDFs that block injection or require page/coordinate precision.",
+        "status": "pending",
         "dependencies": [
           16
         ],
-        "status": "pending",
-        "subtasks": []
+        "priority": "high",
+        "details": "Implement a universal extraction and anchoring system:\n\n- For HTML pages:\n  - Extract main readable content and per-selection snippets, preserving basic structure.\n  - Serialize selections (Range → XPath/TextPosition) to create stable anchors that persist and re-highlight across revisits.\n  - On revisit, re-apply highlights for saved anchors.\n  - Store context chunks and anchors in IndexedDB, keyed by URL + anchorId, deduplicated by hash.\n  - Integrate with RAG: when chatting, include anchored snippet(s) nearest the user’s selection, cite original location, and provide a scroll-back link.\n  - If an <img> is selected, capture src/alt and bounding rect metadata; include as multimodal context.\n  - Gracefully degrade to cached snippets if offline; no network calls in offline mode.\n\n- For PDFs (fallback path):\n  - Detect PDF URLs/content-types or failed content script injection (native viewer/restricted).\n  - Prompt user with 'Open with LearnSphere viewer' when fallback is needed.\n  - Lazy-load PDF.js viewer in an internal page with the PDF URL; provide page/coordinate-level selection overlay.\n  - Store PDF anchors as page number + text range or bounding boxes; cite 'Page X' in responses and support re-highlight.\n  - PDF.js and related assets are loaded only when needed to keep the bundle lean.\n\n- Non-functional:\n  - Maintain MV3 constraints; no injection in restricted pages.\n  - Keep content bundle size stable; PDF.js is dynamically imported or loaded in a separate entry page.\n  - Respect privacy mode; anchors/snippets remain local.\n<info added on 2025-08-17T18:34:03.114Z>\nAcceptance Criteria:\n\n17.1 Implement HTML Content Extraction and Anchoring\n- Selecting text and saving creates an anchor with Range serialization (XPath/TextPosition)\n- Reloading the page re-applies a highlight at the exact location\n- Anchors stored in IndexedDB: {url, anchorId, method, serialized, snippet, hash, createdAt}\n\n17.2 Integrate RAG with Anchored Snippets\n- Chat requests include nearest anchor snippet(s)\n- Assistant replies show a citation with a scroll-back link that focuses the anchor\n- If no anchor exists, falls back to current selection text\n\n17.3 Image Selection Metadata Capture\n- Selecting an <img> stores {src, alt, naturalWidth/Height, boundingClientRect}\n- Multimodal chat includes image data when permitted\n- Preview chip shows a thumbnail and can be removed\n\n17.4 Offline Mode and Caching\n- With navigator.onLine=false, chat still shows cached snippets\n- No network calls are attempted; UI shows offline banner\n- When going back online, normal behavior resumes\n\n17.5 PDF Fallback Detection and Prompt\n- PDFs in native viewer trigger a prompt: \"Open with LearnSphere viewer\"\n- Choosing open launches internal viewer page with the PDF URL appended\n\n17.6 Lazy-load PDF.js Viewer and Anchoring\n- PDF viewer loads only upon request (dynamic import or separate entry)\n- Page/coordinate selection overlay works; anchors include {page, bbox or textRange}\n- Re-opening the same PDF re-highlights saved anchors\n\n17.7 IndexedDB Anchor Storage and Deduplication\n- Duplicate anchors (same url+hash) are not duplicated\n- List/inspect shows unique anchors with timestamps\n\n17.8 Bundle Size and Privacy Constraints\n- content.js size remains within current range; no added runtime chunks\n- PDF viewer assets only fetched when viewer is opened\n- Privacy mode prevents anchors/snippets from leaving local storage\n</info added on 2025-08-17T18:34:03.114Z>",
+        "testStrategy": "1. On any HTML page, select text and save or ask a question; verify that an anchor is created, re-highlights on reload, and is visible in chat citations.\n2. Simulate offline mode and confirm cached snippets are shown with no network calls.\n3. On a PDF in the native viewer, verify the user is offered 'Open with LearnSphere viewer'; opening provides page/coordinate selection and chat cites the page.\n4. Inspect IndexedDB to confirm anchor records are keyed by URL + anchorId, contain snippet text, serialization, and timestamps, and are deduplicated by hash.\n5. Confirm that bundle size impact is limited to optional viewer assets and content.js remains single-file and light.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement HTML Content Extraction and Anchoring",
+            "description": "Develop logic to extract main content and per-selection snippets from HTML pages. Serialize selections to stable anchors (XPath/TextPosition), store in IndexedDB, and support re-highlighting on revisit.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 2,
+            "title": "Integrate RAG with Anchored Snippets",
+            "description": "When user chats, include the anchored snippet(s) nearest their selection, cite the original location, and provide a scroll-back link in the chat UI.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 3,
+            "title": "Image Selection Metadata Capture",
+            "description": "When an <img> element is selected, capture src/alt and bounding rect metadata, and include as multimodal context for extraction and RAG.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 4,
+            "title": "Offline Mode and Caching",
+            "description": "Implement offline fallback: serve cached snippets and anchors from IndexedDB when offline; ensure no network calls are made.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 5,
+            "title": "PDF Fallback Detection and Prompt",
+            "description": "Detect when a PDF is encountered (by URL/content-type or failed injection) and prompt the user with 'Open with LearnSphere viewer'.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 6,
+            "title": "Lazy-load PDF.js Viewer and Anchoring",
+            "description": "Implement internal page to lazy-load PDF.js viewer with the PDF URL. Provide page/coordinate-level selection overlay and anchor storage (page number + text range or bounding box). Support re-highlighting and citation as 'Page X'.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 7,
+            "title": "IndexedDB Anchor Storage and Deduplication",
+            "description": "Ensure all anchors and context chunks are stored in IndexedDB, keyed by URL + anchorId, deduplicated by hash, and include snippet text, serialization, and timestamps.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          },
+          {
+            "id": 8,
+            "title": "Bundle Size and Privacy Constraints",
+            "description": "Verify that PDF.js and related assets are only loaded when needed, content.js remains single-file and light, and all anchors/snippets remain local in privacy mode.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "",
+            "testStrategy": ""
+          }
+        ]
       },
       {
         "id": 18,

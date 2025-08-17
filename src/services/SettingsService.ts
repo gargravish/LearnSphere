@@ -1,5 +1,6 @@
 export interface ExtensionSettings {
   geminiApiKey: string;
+  geminiModel?: string;
   theme: 'light' | 'dark' | 'auto';
   chatSidebarPosition: 'left' | 'right';
   chatSidebarWidth: number;
@@ -212,6 +213,7 @@ export class SettingsService {
   private getDefaultSettings(): ExtensionSettings {
     return {
       geminiApiKey: '',
+      geminiModel: 'gemini-2.5-flash',
       theme: 'auto',
       chatSidebarPosition: 'right',
       chatSidebarWidth: 400,
@@ -396,6 +398,11 @@ export class SettingsService {
     return this.settings.geminiApiKey;
   }
 
+  /** Get chosen Gemini model */
+  public getGeminiModel(): string {
+    return this.settings.geminiModel || 'gemini-2.5-flash';
+  }
+
   /**
    * Set Gemini API key
    */
@@ -436,7 +443,8 @@ export class SettingsService {
    */
   public async testApiKey(apiKey: string): Promise<{ valid: boolean; error?: string }> {
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const model = this.getGeminiModel();
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

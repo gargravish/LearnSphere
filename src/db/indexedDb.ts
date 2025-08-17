@@ -1,11 +1,13 @@
 import Dexie, { Table } from 'dexie';
-import { QuizResult, ChatTopic, AnalyticsEvent, QuizStats, RevisionPlan } from './types';
+import { QuizResult, ChatTopic, AnalyticsEvent, QuizStats, RevisionPlan, AnchorRecord, PageContentCache } from './types';
 
 export class LearnSphereDB extends Dexie {
   public quizResults!: Table<QuizResult, number>;
   public chatTopics!: Table<ChatTopic, number>;
   public analytics!: Table<AnalyticsEvent, number>;
   public revisionPlans!: Table<RevisionPlan, number>;
+  public anchors!: Table<AnchorRecord, number>;
+  public pageCache!: Table<PageContentCache, number>;
 
   constructor() {
     super('LearnSphereDB');
@@ -43,10 +45,32 @@ export class LearnSphereDB extends Dexie {
       revisionPlans: '++id, createdAt'
     });
 
+    // v4: add anchors store
+    this.version(4).stores({
+      quizResults: '++id, createdAt, sourceUrl, percentage, documentTitle',
+      chatTopics: '++id, topic, lastAskedAt, count',
+      analytics: '++id, eventType, createdAt',
+      revisionPlans: '++id, createdAt',
+      anchors: '++id, url, anchorId, hash, createdAt'
+    });
+
+    // v5: add pageCache store (url unique)
+    this.version(5).stores({
+      quizResults: '++id, createdAt, sourceUrl, percentage, documentTitle',
+      chatTopics: '++id, topic, lastAskedAt, count',
+      analytics: '++id, eventType, createdAt',
+      revisionPlans: '++id, createdAt',
+      anchors: '++id, url, anchorId, hash, createdAt',
+      pageCache: '++id, url, updatedAt'
+    });
+
     this.quizResults = this.table('quizResults');
     this.chatTopics = this.table('chatTopics');
     this.analytics = this.table('analytics');
     this.revisionPlans = this.table('revisionPlans');
+    this.anchors = this.table('anchors');
+    // @ts-ignore
+    this.pageCache = this.table('pageCache');
   }
 
   // Quiz results
@@ -98,6 +122,31 @@ export class LearnSphereDB extends Dexie {
 
   async getLatestRevisionPlan(): Promise<RevisionPlan | undefined> {
     return this.revisionPlans.orderBy('createdAt').reverse().first();
+  }
+
+  // Anchors
+  async upsertAnchor(record: AnchorRecord): Promise<number> {
+    const existing = await this.anchors.where({ url: record.url, hash: record.hash }).first();
+    if (existing) return existing.id!;
+    return this.anchors.add({ ...record, createdAt: record.createdAt ?? Date.now() });
+  }
+
+  async getAnchorsByUrl(url: string): Promise<AnchorRecord[]> {
+    return this.anchors.where({ url }).toArray();
+  }
+
+  // Page cache
+  async upsertPageCache(entry: PageContentCache): Promise<number> {
+    const existing = await this.pageCache.where({ url: entry.url }).first();
+    if (existing) {
+      await this.pageCache.update(existing.id!, { ...entry, updatedAt: entry.updatedAt ?? Date.now() });
+      return existing.id!;
+    }
+    return this.pageCache.add({ ...entry, updatedAt: entry.updatedAt ?? Date.now() });
+  }
+
+  async getPageCache(url: string): Promise<PageContentCache | undefined> {
+    return this.pageCache.where({ url }).first();
   }
 }
 

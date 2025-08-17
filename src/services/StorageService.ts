@@ -1,5 +1,5 @@
 import { db } from '@/db/indexedDb';
-import { QuizResult, AnalyticsEvent } from '@/db/types';
+import { QuizResult, AnalyticsEvent, AnchorRecord, PageContentCache } from '@/db/types';
 
 /**
  * StorageService is a thin modular wrapper around IndexedDB (Dexie) to persist
@@ -51,6 +51,24 @@ export const StorageService = {
   async logChatAsked(topic: string, meta?: { sourceUrl?: string; documentTitle?: string }) {
     await db.addOrIncrementTopic(topic, meta);
     return db.logEvent({ eventType: 'chat_asked', createdAt: Date.now(), payload: { topic }, ...meta });
+  },
+
+  // Anchors API
+  async saveAnchor(rec: Omit<AnchorRecord, 'id' | 'createdAt'>) {
+    return db.upsertAnchor({ ...rec, createdAt: Date.now() } as AnchorRecord);
+  },
+
+  async getAnchors(url: string) {
+    return db.getAnchorsByUrl(url);
+  },
+
+  // Page cache (offline)
+  async savePageCache(entry: Omit<PageContentCache, 'id' | 'updatedAt'> & { updatedAt?: number }) {
+    return db.upsertPageCache({ ...entry, updatedAt: entry.updatedAt ?? Date.now() });
+  },
+
+  async getPageCache(url: string) {
+    return db.getPageCache(url);
   }
 };
 
