@@ -23,7 +23,8 @@ module.exports = (env, argv) => {
         {
           test: /\.tsx?$/,
           use: 'ts-loader',
-          exclude: /node_modules/
+          // Exclude tests from the extension bundle build
+          exclude: [/node_modules/, /__tests__/, /\.test\.ts$/, /\.test\.tsx$/]
         },
         {
           test: /\.css$/,

@@ -38,6 +38,10 @@ export class ChatSidebarService {
   private quizService: QuizService;
   private quizGenerator: QuizGenerator;
   private quizInterface: QuizInterface;
+  private pendingPastedImage: Blob | null = null;
+  private pendingPastedText: string | null = null;
+  private previewContainer: HTMLElement | null = null;
+  private pasteButton: HTMLButtonElement | null = null;
 
   constructor() {
     this.state = {
@@ -295,6 +299,17 @@ export class ChatSidebarService {
       align-items: flex-end;
     `;
 
+    // Preview container (for pasted image/text chip)
+    this.previewContainer = document.createElement('div');
+    this.previewContainer.style.cssText = `
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    `;
+    inputArea.appendChild(this.previewContainer);
+
     const textarea = document.createElement('textarea');
     textarea.id = 'chat-input';
     textarea.placeholder = 'Ask a question about the selected content...';
@@ -347,10 +362,53 @@ export class ChatSidebarService {
       textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
     });
 
+    // Paste from Clipboard button
+    this.pasteButton = document.createElement('button');
+    this.pasteButton.textContent = '📋 Paste from Clipboard';
+    this.pasteButton.title = 'Read image or text from your clipboard';
+    this.pasteButton.style.cssText = `
+      padding: 10px 12px;
+      background: #e5e7eb;
+      color: #111827;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    `;
+    this.pasteButton.addEventListener('mouseenter', () => {
+      if (this.pasteButton) this.pasteButton.style.background = '#dfe3e8';
+    });
+    this.pasteButton.addEventListener('mouseleave', () => {
+      if (this.pasteButton) this.pasteButton.style.background = '#e5e7eb';
+    });
+    this.pasteButton.addEventListener('click', () => this.handlePasteButtonClick());
+
+    // Fallback: handle Ctrl/Cmd+V in textarea
+    textarea.addEventListener('paste', (event: ClipboardEvent) => this.handlePasteEvent(event));
+
     inputContainer.appendChild(textarea);
-    inputContainer.appendChild(sendButton);
+    // Button row: Send then Paste for correct Tab order
+    const buttonRow = document.createElement('div');
+    buttonRow.className = 'ls-btn-row';
+    buttonRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-top:8px; justify-content:flex-end; flex-wrap:nowrap;';
+    // Ensure the two buttons can sit side-by-side
+    Object.assign(sendButton.style, { width: 'auto', display: 'inline-flex', flex: '0 0 auto', marginTop: '0' });
+    Object.assign(this.pasteButton.style, { width: 'auto', display: 'inline-flex', flex: '0 0 auto', marginTop: '0' });
+    // Tab from textarea should land on Send first
+    sendButton.tabIndex = 0;
+    this.pasteButton.tabIndex = 0;
+    buttonRow.appendChild(sendButton);
+    buttonRow.appendChild(this.pasteButton);
+    inputContainer.appendChild(buttonRow);
     inputArea.appendChild(inputContainer);
     this.sidebar!.appendChild(inputArea);
+
+    // Initialize offline/online handling for paste button
+    this.updatePasteButtonState();
+    window.addEventListener('online', () => this.updatePasteButtonState());
+    window.addEventListener('offline', () => this.updatePasteButtonState());
   }
 
   /**
@@ -399,6 +457,165 @@ export class ChatSidebarService {
         this.toggle();
       }
     });
+  }
+
+  /**
+   * Update paste button enabled state based on connectivity
+   */
+  private updatePasteButtonState(): void {
+    if (!this.pasteButton) return;
+    const online = navigator.onLine;
+    this.pasteButton.disabled = !online;
+    this.pasteButton.style.opacity = online ? '1' : '0.6';
+    this.pasteButton.title = online ? 'Read image or text from your clipboard' : 'Offline: paste disabled';
+  }
+
+  /**
+   * Handle explicit paste button click using async Clipboard API
+   */
+  private async handlePasteButtonClick(): Promise<void> {
+    // Must be called on user gesture. Try navigator.clipboard.read first
+    try {
+      if ('clipboard' in navigator && 'read' in navigator.clipboard) {
+        // @ts-ignore
+        const items: ClipboardItems = await (navigator.clipboard as any).read();
+        for (const item of items as any[]) {
+          const types: string[] = item.types || [];
+          if (types.includes('image/png')) {
+            const blob: Blob = await item.getType('image/png');
+            this.setPastedImage(blob, 'image/png');
+            return;
+          }
+          if (types.includes('image/jpeg')) {
+            const blob: Blob = await item.getType('image/jpeg');
+            this.setPastedImage(blob, 'image/jpeg');
+            return;
+          }
+          if (types.includes('text/plain')) {
+            const blob: Blob = await item.getType('text/plain');
+            const text = await blob.text();
+            this.setPastedText(text);
+            return;
+          }
+        }
+        this.setError('Clipboard does not contain supported image or text.');
+        return;
+      }
+    } catch (err) {
+      console.warn('Async clipboard read failed, falling back to readText/paste event', err);
+      // Try readText as best-effort
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          this.setPastedText(text.trim());
+          return;
+        }
+      } catch {}
+      this.setError('Unable to access clipboard. Try Cmd/Ctrl+V in the input box.');
+      return;
+    }
+    // If we got here, feature unsupported
+    this.setError('Clipboard API not supported. Use Cmd/Ctrl+V to paste into the input.');
+  }
+
+  /**
+   * Handle paste keyboard event (fallback)
+   */
+  private handlePasteEvent(event: ClipboardEvent): void {
+    const dt = event.clipboardData;
+    if (!dt) return;
+    // Prefer images
+    for (const item of dt.items) {
+      if (item.type === 'image/png' || item.type === 'image/jpeg') {
+        const blob = item.getAsFile();
+        if (blob) {
+          event.preventDefault();
+          this.setPastedImage(blob, item.type);
+          return;
+        }
+      }
+    }
+    // Fallback to text
+    const text = dt.getData('text/plain');
+    if (text && text.trim()) {
+      // Allow normal paste into textarea; also set as pasted context
+      this.setPastedText(text.trim());
+    }
+  }
+
+  /**
+   * Store pasted image in memory and show preview chip
+   */
+  private setPastedImage(blob: Blob, mime: string): void {
+    this.pendingPastedImage = blob;
+    this.pendingPastedText = null; // image takes precedence
+    this.renderPreviewChip({ type: 'image', blob, mime });
+  }
+
+  /**
+   * Store pasted text as context and show preview chip
+   */
+  private setPastedText(text: string): void {
+    this.pendingPastedText = text;
+    this.pendingPastedImage = null;
+    this.renderPreviewChip({ type: 'text', text });
+  }
+
+  /**
+   * Render/replace a single preview chip
+   */
+  private renderPreviewChip(input: { type: 'image'; blob: Blob; mime: string } | { type: 'text'; text: string }): void {
+    if (!this.previewContainer) return;
+    this.previewContainer.innerHTML = '';
+
+    const chip = document.createElement('div');
+    chip.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #d1d5db;
+      background: #f9fafb;
+      color: #111827;
+      border-radius: 9999px;
+      padding: 6px 10px;
+      max-width: 100%;
+    `;
+
+    if (input.type === 'image') {
+      const img = document.createElement('img');
+      img.style.cssText = 'width: 36px; height: 36px; border-radius: 6px; object-fit: cover;';
+      const url = URL.createObjectURL(input.blob);
+      img.src = url;
+      chip.appendChild(img);
+      const label = document.createElement('span');
+      label.textContent = 'Pasted image ready to send';
+      label.style.cssText = 'font-size: 12px; white-space: nowrap;';
+      chip.appendChild(label);
+    } else {
+      const icon = document.createElement('span');
+      icon.textContent = '📝';
+      chip.appendChild(icon);
+      const label = document.createElement('span');
+      label.textContent = input.text.length > 60 ? input.text.slice(0, 60) + '…' : input.text;
+      label.style.cssText = 'font-size: 12px;';
+      chip.appendChild(label);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.style.cssText = `
+      width: 20px; height: 20px; line-height: 20px; text-align: center;
+      border: none; border-radius: 50%; background: #e5e7eb; cursor: pointer; font-weight: 700;
+    `;
+    removeBtn.addEventListener('click', () => {
+      this.pendingPastedImage = null;
+      this.pendingPastedText = null;
+      if (this.previewContainer) this.previewContainer.innerHTML = '';
+    });
+    chip.appendChild(removeBtn);
+
+    this.previewContainer.appendChild(chip);
   }
 
   /**
@@ -524,17 +741,38 @@ export class ChatSidebarService {
     this.setLoading(true);
 
     try {
-      // Get AI response using RAG
-      const aiResponse = await this.aiService.generateRAGResponse(messageText, this.currentSelection || undefined);
-      
-      const assistantMessage: ChatMessage = {
-        id: this.generateMessageId(),
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
-
-      this.addMessage(assistantMessage);
+      // If there is pending pasted image/text, use multimodal flow
+      if (this.pendingPastedImage || this.pendingPastedText) {
+        const aiResponse = await this.aiService.generateRAGResponseMultimodal(
+          messageText,
+          {
+            imageBlob: this.pendingPastedImage || undefined,
+            pastedText: this.pendingPastedText || undefined,
+            selection: this.currentSelection || undefined
+          }
+        );
+        const assistantMessage: ChatMessage = {
+          id: this.generateMessageId(),
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        this.addMessage(assistantMessage);
+        // Clear preview
+        this.pendingPastedImage = null;
+        this.pendingPastedText = null;
+        if (this.previewContainer) this.previewContainer.innerHTML = '';
+      } else {
+        // Standard RAG text-only flow
+        const aiResponse = await this.aiService.generateRAGResponse(messageText, this.currentSelection || undefined);
+        const assistantMessage: ChatMessage = {
+          id: this.generateMessageId(),
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        this.addMessage(assistantMessage);
+      }
     } catch (error) {
       console.error('Error getting AI response:', error);
       this.setError('Failed to get response. Please try again.');

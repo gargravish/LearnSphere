@@ -55,6 +55,30 @@ A Chrome extension that transforms static PDF documents into dynamic, interactiv
 2. Extract the ZIP file
 3. Follow steps 4-6 from the development setup above
 
+## Framework Setup (Task 16)
+
+This repo is already configured with Manifest V3, TypeScript, React and webpack.
+
+- Manifest: `src/manifest.json` (MV3 service worker background, permissions: `activeTab`, `storage`, `contextMenus`, `scripting`; host permissions for http/https)
+- Bundling: `webpack.config.js` produces single-file entry points for `popup`, `content`, `background`, and `options` (no runtime chunk to avoid MV3 chunk-load issues)
+- TypeScript: `tsconfig.json` targets ES2020/DOM; excludes tests from bundling outputs
+- Popup/Options: React apps under `src/pages/popup` and `src/pages/options`
+- Background: context menus and content script injection (`src/background/index.ts`)
+- Content script: sidebar UI and multimodal chat (`src/content/index.ts`)
+
+### Build and Load
+
+1. `npm install`
+2. `npm run build`
+3. Load `dist/` via `chrome://extensions` → Developer Mode → Load unpacked
+
+### Sanity Checks
+
+- Popup renders: click the extension icon → UI appears
+- Background active: `chrome://extensions` → Service Worker → check console logs
+- Context menus: right‑click a page → “🚀 LearnSphere” menu
+- Content script: invoke a menu → sidebar opens
+
 ## Usage
 
 ### Getting Started

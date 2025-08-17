@@ -96,6 +96,16 @@ F-6.1	Opt-In Only: Cloud synchronization MUST be disabled by default and require
 F-6.2	Data Synchronization: If enabled, the local IndexedDB data is synchronized to a secure cloud backend (e.g., Firestore or other transactional DB).	Medium
 F-6.3	BigQuery Integration (Optional): If Cloud Sync is enabled, the synchronized data can be piped to BigQuery. This serves as an optional layer for long-term backup, disaster recovery, and advanced analytical queries by the user or organization.	Low
 F-6.4	The extension MUST NOT require Cloud Sync (F-6.1) to be enabled for any core personalization functionality (F-5.1 to F-5.5).	Critical
+
+4.7. Feature: Multimodal Clipboard Paste
+
+ID	Requirement	Priority
+F-2.6	The chat sidebar MUST provide a "Paste from Clipboard" button that captures the current clipboard contents (image or text) and includes it as context in the next chat prompt.	High
+F-2.6.1	When an image (PNG/JPEG) is pasted, the system MUST send the image to Gemini multimodal for analysis, grounding explanations in the current document context when available.	High
+F-2.6.2	When text is pasted, the system MUST treat it as selected content context, preserving formatting where possible.	High
+F-2.6.3	The UI MUST clearly indicate clipboard access requirements, use user gestures as needed, and provide fallbacks to standard paste (Ctrl/Cmd+V). Display clear error messages for permission or format issues.	Medium
+F-2.6.4	Privacy: Do not persist pasted images by default; only transmit to the AI when explicitly submitted by the user. Provide clear indicators and an option to discard.	Critical
+F-2.6.5	Offline/limited connectivity: Provide graceful degradation with informative guidance when network or AI API is unavailable.	Medium
 5. System Architecture & Technology Stack
 5.1. Architecture Overview
 

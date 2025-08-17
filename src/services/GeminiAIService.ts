@@ -291,6 +291,76 @@ export class GeminiAIService {
   }
 
   /**
+   * Generate a response using RAG with optional multimodal clipboard inputs
+   */
+  public async generateRAGResponseMultimodal(
+    userMessage: string,
+    opts: {
+      imageBlob?: Blob;
+      pastedText?: string;
+      selection?: TextSelection | AreaSelection;
+    }
+  ): Promise<string> {
+    if (!this.isInitialized) {
+      throw new Error('Gemini AI Service not initialized');
+    }
+
+    const { imageBlob, pastedText, selection } = opts;
+
+    // Build parts array for Gemini: text prompt + optional inlineData image + optional pasted text
+    const relevantContext = await this.getRelevantContext(userMessage, selection);
+    const prompt = this.buildRAGPrompt(userMessage, relevantContext, selection);
+
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+    parts.push({ text: prompt });
+
+    if (pastedText && pastedText.trim()) {
+      parts.push({ text: `\n\nAdditional pasted text context provided by user:\n${pastedText.trim()}` });
+    }
+
+    if (imageBlob) {
+      const base64 = await this.blobToBase64(imageBlob);
+      const mimeType = imageBlob.type || 'image/png';
+      parts.push({ inlineData: { mimeType, data: base64 } });
+    }
+
+    const request: GeminiRequest = {
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: this.config.temperature,
+        topK: this.config.topK,
+        topP: this.config.topP,
+        maxOutputTokens: this.config.maxTokens,
+        stopSequences: []
+      },
+      safetySettings: this.config.safetySettings
+    };
+
+    const response = await this.makeRequest(request);
+    if (!response.candidates || response.candidates.length === 0) {
+      throw new Error('No response generated from Gemini API');
+    }
+    const generatedText = response.candidates[0].content.parts[0].text;
+
+    this.addToHistory({ id: `msg_${Date.now()}`, role: 'user', content: userMessage, timestamp: new Date() });
+    this.addToHistory({ id: `msg_${Date.now()}_ai`, role: 'assistant', content: generatedText, timestamp: new Date() });
+    return generatedText;
+  }
+
+  private async blobToBase64(blob: Blob): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = reader.result as string;
+        const idx = res.indexOf(',');
+        resolve(idx >= 0 ? res.slice(idx + 1) : res);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
    * Build RAG prompt with context
    */
   private buildRAGPrompt(

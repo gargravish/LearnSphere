@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsService } from '@/services/SettingsService';
 import './SettingsPage.css';
+import KnowledgeTab from './KnowledgeTab';
 
 interface SettingsPageProps {
   onClose?: () => void;
@@ -626,7 +627,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
       case 'highlights':
         return renderHighlightsTab();
       case 'knowledge':
-        return <div className="settings-tab"><h3>Loading…</h3></div>;
+        return <KnowledgeTab />;
       default:
         return renderGeneralTab();
     }

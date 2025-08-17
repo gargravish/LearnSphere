@@ -8,8 +8,27 @@ const GEMINI_MODEL = 'gemini-1.5-flash';
 
 async function loadGeminiKey(): Promise<string | null> {
   try {
-    const result = await chrome.storage.sync.get('learnsphere_settings');
-    const key = result?.learnsphere_settings?.geminiApiKey || null;
+    // Prefer synced settings; fall back to local if sync unavailable
+    let key: string | null = null;
+    try {
+      // @ts-ignore
+      const result = await (chrome?.storage?.sync?.get?.('learnsphere_settings') ?? Promise.resolve(null));
+      if (result && result.learnsphere_settings) {
+        key = result.learnsphere_settings.geminiApiKey || null;
+      }
+    } catch {}
+    if (!key) {
+      try {
+        // @ts-ignore
+        const local = await (chrome?.storage?.local?.get?.('learnsphere_settings') ?? Promise.resolve(null));
+        if (local && local.learnsphere_settings) {
+          key = local.learnsphere_settings.geminiApiKey || null;
+        }
+      } catch {}
+    }
+    if (!key && typeof localStorage !== 'undefined') {
+      key = localStorage.getItem('learnsphere_gemini_api_key');
+    }
     geminiApiKey = key;
     return key;
   } catch (e) {
@@ -57,6 +76,46 @@ async function callGemini(prompt: string): Promise<string> {
     }
   }
   throw lastError || new Error('Unknown error while calling Gemini');
+}
+
+// Multimodal Gemini call with optional image/text parts
+async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; pastedText?: string }): Promise<string> {
+  const key = geminiApiKey || (await loadGeminiKey());
+  if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+  parts.push({ text: prompt });
+  if (opts?.pastedText && opts.pastedText.trim()) {
+    parts.push({ text: `\n\nAdditional pasted text context provided by user:\n${opts.pastedText.trim()}` });
+  }
+  if (opts?.imageBlob) {
+    const base64 = await blobToBase64(opts.imageBlob);
+    parts.push({ inlineData: { mimeType: opts.imageBlob.type || 'image/png', data: base64 } });
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 800 } })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
+  }
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(No response)';
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = String(reader.result);
+      const idx = res.indexOf(',');
+      resolve(idx >= 0 ? res.slice(idx + 1) : res);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 // --- Markdown rendering utilities (safe subset) ---
@@ -147,6 +206,7 @@ function ensureSidebarStyles(): void {
     .ls-footer { border-top: 1px solid #eee; padding: 8px 12px; }
     .ls-textarea { width: 100%; min-height: 70px; resize: vertical; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; }
     .ls-button { margin-top: 8px; width: 100%; padding: 8px 10px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font-size: 13px; }
+    .ls-btn-row .ls-button { margin-top: 0; width: auto; }
     .ls-chip { display: inline-block; padding: 2px 6px; background: #f3f4f6; border-radius: 999px; font-size: 11px; color: #374151; }
     .ls-message { padding: 10px 12px; border-radius: 8px; margin: 8px 0; font-size: 13px; line-height: 1.55; }
     .ls-message.user { background: #eef2ff; border: 1px solid #e0e7ff; color: #1e3a8a; }
@@ -251,10 +311,87 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
     history.appendChild(hello);
     content.appendChild(history);
 
+    // Preview container for pasted content
+    const preview = document.createElement('div');
+    preview.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;';
+    content.appendChild(preview);
+
+    let pendingPastedImage: Blob | null = null;
+    let pendingPastedText: string | null = null;
+
     const ta = document.createElement('textarea');
     ta.id = 'ls-chat-input';
     ta.placeholder = 'Type your question…';
     ta.className = 'ls-textarea';
+
+    // Paste button
+    const pasteBtn = document.createElement('button');
+    pasteBtn.className = 'ls-button';
+    pasteBtn.textContent = '📋 Paste from Clipboard';
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        // @ts-ignore
+        if (navigator?.clipboard?.read) {
+          // @ts-ignore
+          const items: ClipboardItems = await navigator.clipboard.read();
+          for (const item of items as any[]) {
+            const types: string[] = item.types || [];
+            if (types.includes('image/png')) { const blob = await item.getType('image/png'); setPastedImage(blob); return; }
+            if (types.includes('image/jpeg')) { const blob = await item.getType('image/jpeg'); setPastedImage(blob); return; }
+            if (types.includes('text/plain')) { const blob = await item.getType('text/plain'); const text = await blob.text(); setPastedText(text); return; }
+          }
+          showErrorChip('Clipboard does not contain supported image or text.');
+          return;
+        }
+      } catch (err) {
+        console.warn('Clipboard read failed, fallback to readText/paste', err);
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text && text.trim()) { setPastedText(text.trim()); return; }
+        } catch {}
+        showErrorChip('Unable to access clipboard. Try Cmd/Ctrl+V in the input.');
+        return;
+      }
+      showErrorChip('Clipboard API not supported. Use Cmd/Ctrl+V to paste.');
+    });
+
+    // Fallback: paste handler in textarea
+    ta.addEventListener('paste', (event: ClipboardEvent) => {
+      const dt = event.clipboardData;
+      if (!dt) return;
+      for (const item of dt.items) {
+        if (item.type === 'image/png' || item.type === 'image/jpeg') {
+          const blob = item.getAsFile();
+          if (blob) { event.preventDefault(); setPastedImage(blob); return; }
+        }
+      }
+      const text = dt.getData('text/plain');
+      if (text && text.trim()) setPastedText(text.trim());
+    });
+
+    function setPastedImage(blob: Blob) {
+      pendingPastedImage = blob; pendingPastedText = null; renderPreviewChip({ type: 'image', blob });
+    }
+    function setPastedText(text: string) {
+      pendingPastedText = text; pendingPastedImage = null; renderPreviewChip({ type: 'text', text });
+    }
+    function showErrorChip(msg: string) { renderPreviewChip({ type: 'text', text: `Error: ${msg}` }); }
+    function renderPreviewChip(input: { type: 'image'; blob: Blob } | { type: 'text'; text: string }) {
+      preview.innerHTML = '';
+      const chip = document.createElement('div');
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:8px;border:1px solid #d1d5db;background:#f9fafb;color:#111827;border-radius:9999px;padding:6px 10px;max-width:100%';
+      if (input.type === 'image') {
+        const img = document.createElement('img'); img.style.cssText = 'width:36px;height:36px;border-radius:6px;object-fit:cover;'; img.src = URL.createObjectURL(input.blob); chip.appendChild(img);
+        const label = document.createElement('span'); label.textContent = 'Pasted image ready to send'; label.style.cssText = 'font-size:12px;white-space:nowrap;'; chip.appendChild(label);
+      } else {
+        const icon = document.createElement('span'); icon.textContent = '📝'; chip.appendChild(icon);
+        const label = document.createElement('span'); label.textContent = input.text.length > 60 ? input.text.slice(0,60)+'…' : input.text; label.style.cssText = 'font-size:12px;'; chip.appendChild(label);
+      }
+      const removeBtn = document.createElement('button'); removeBtn.textContent = '×'; removeBtn.title = 'Remove'; removeBtn.style.cssText = 'width:20px;height:20px;line-height:20px;text-align:center;border:none;border-radius:50%;background:#e5e7eb;cursor:pointer;font-weight:700;';
+      removeBtn.addEventListener('click', () => { pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = ''; });
+      chip.appendChild(removeBtn);
+      preview.appendChild(chip);
+    }
 
     const send = document.createElement('button');
     send.className = 'ls-button';
@@ -276,9 +413,16 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       try {
         const guidelines = 'Respond in clean Markdown with headings, bullet points, and numbered steps when helpful. Keep answers concise and scannable.';
         const context = selection ? `\n\nContext (selected):\n${selection}` : '';
-        const answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}`);
+        let answer: string;
+        if (pendingPastedImage || pendingPastedText) {
+          answer = await callGeminiMultimodal(`${guidelines}\n\nQuestion: ${text}${context}`, { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined });
+        } else {
+          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}`);
+        }
         thinking.innerHTML = markdownToHtml(answer);
         try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
+        // Clear preview after send
+        pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = '';
       } catch (e) {
         const msg = (e as Error).message || 'Unknown error';
         thinking.innerHTML = markdownToHtml(`**Error:** ${msg}\n\nTry again in a few seconds. If the issue persists, verify your network and API key in Settings.`);
@@ -286,7 +430,20 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
       history.scrollTop = history.scrollHeight;
     });
 
-    footer.append(ta, send);
+    // Place buttons side-by-side, Send first for proper tab order
+    const btnRow = document.createElement('div');
+    btnRow.className = 'ls-btn-row';
+    btnRow.style.cssText = 'display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:8px; flex-wrap:nowrap;';
+    // Override global button width and layout so they sit side by side
+    Object.assign(send.style, { width: 'auto', display: 'inline-flex', flex: '0 0 auto', marginTop: '0' });
+    Object.assign(pasteBtn.style, { width: 'auto', display: 'inline-flex', flex: '0 0 auto', marginTop: '0' });
+    // Ensure tabbing from textarea goes to Send first (order in DOM already enforces this)
+    send.tabIndex = 0;
+    pasteBtn.tabIndex = 0;
+    btnRow.appendChild(send);
+    btnRow.appendChild(pasteBtn);
+
+    footer.append(ta, btnRow);
   }
 
   if (type === 'summary') {

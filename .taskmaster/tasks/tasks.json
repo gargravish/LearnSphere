@@ -228,11 +228,239 @@
         ],
         "details": "Create testing framework:\n- Implement unit tests for core functionality\n- Add integration tests for AI interactions\n- Create end-to-end tests for user workflows\n- Test with various PDF types and content\n- Implement performance testing\n- Add accessibility testing\n- Create automated testing pipeline",
         "testStrategy": "Run comprehensive test suite and verify all functionality works as expected."
+      },
+      {
+        "id": 16,
+        "title": "Chrome Extension Framework Setup",
+        "description": "Initialize the Chrome Extension project using Manifest V3, TypeScript, and React. Establish the base structure for extension lifecycle, permissions, and UI mounting.",
+        "details": "Create the extension manifest (v3), configure TypeScript and React, set up webpack or Vite for bundling, and scaffold the popup and sidebar components. Ensure permissions for file access, clipboard, and storage are declared.",
+        "testStrategy": "Verify extension loads in Chrome, UI mounts correctly, and permissions are recognized. Run unit tests for initialization logic.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 17,
+        "title": "PDF Viewer Integration and Multimodal Rendering",
+        "description": "Integrate PDF.js to render PDFs within the extension, preserving layout and multimodal elements (text, diagrams, charts, equations).",
+        "details": "Implement PDF.js viewer component in React. Ensure accurate rendering of PDFs from both web URLs and local files. Support OCR for scanned documents and maintain multimodal fidelity. Provide hooks for selection and annotation.",
+        "testStrategy": "Open sample PDFs (including complex layouts) and verify rendering accuracy. Test OCR fallback for scanned documents. Validate selection and annotation capabilities.",
+        "priority": "high",
+        "dependencies": [
+          16
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 18,
+        "title": "Document Processing and RAG Indexing",
+        "description": "Process opened PDFs for multimodal extraction and index content for Retrieval Augmented Generation (RAG).",
+        "details": "On PDF load, extract text, images, diagrams, and equations. Use OCR as needed. Generate embeddings via Gemini API and store vector indices locally. Prepare context objects for RAG queries.",
+        "testStrategy": "Open various PDFs and confirm extraction of all multimodal elements. Validate embedding generation and local index creation. Test retrieval accuracy for sample queries.",
+        "priority": "high",
+        "dependencies": [
+          17
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 19,
+        "title": "Multimodal Selection and Annotation Tools",
+        "description": "Enable users to select text and draw bounding boxes around non-text elements (diagrams, charts, equations) within the PDF viewer.",
+        "details": "Implement text highlighting and bounding box drawing tools in the PDF.js layer. Store selection metadata for context passing. Ensure selection UI is intuitive and performant.",
+        "testStrategy": "Test selection of text and non-text elements on diverse PDFs. Validate metadata storage and UI responsiveness. Confirm selections trigger downstream actions.",
+        "priority": "high",
+        "dependencies": [
+          17
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 20,
+        "title": "Contextual Chat Sidebar with Strict RAG AI",
+        "description": "Develop the chat sidebar that triggers on selection, passes context to Gemini, and strictly grounds responses in the loaded PDF using RAG.",
+        "details": "Implement sidebar UI in React. On selection, auto-populate context and invoke Gemini API with strict RAG constraints. Maintain local interaction history per document. Enforce grounding by limiting context to indexed PDF content.",
+        "testStrategy": "Select content and trigger chat. Validate context passing, AI response grounding, and local history storage. Test with multimodal selections and verify responses are strictly PDF-based.",
+        "priority": "high",
+        "dependencies": [
+          18,
+          19
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 21,
+        "title": "Dynamic Study Aid Generation (Summaries, Flashcards, Quizzes)",
+        "description": "Allow users to generate study aids (summaries, flashcards, MCQs) for selected scope (page, chapter, document) using Gemini multimodal analysis.",
+        "details": "Implement UI for scope selection. Use Gemini to generate brief/detailed summaries, term/definition flashcards, and MCQs with plausible distractors. Enable review, edit, local storage, and export (Anki, CSV) for flashcards. Record quiz results locally.",
+        "testStrategy": "Generate study aids for various scopes. Validate output quality, editability, local storage, and export functionality. Test quiz scoring and local result recording.",
+        "priority": "high",
+        "dependencies": [
+          20
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 22,
+        "title": "Concept Visualization & Simplification Tools",
+        "description": "Provide ELI5 explanations and visualization aids (structured text, flowcharts via Mermaid.js) for selected concepts using Gemini.",
+        "details": "Add UI options for 'Explain Like I'm Five' and 'Visualize this concept.' Integrate Gemini for simplified explanations and generate Mermaid.js syntax for flowcharts. Render visualizations in sidebar.",
+        "testStrategy": "Request ELI5 and visualization for diverse concepts. Validate explanation clarity and visualization rendering. Test Mermaid.js output for correctness.",
+        "priority": "medium",
+        "dependencies": [
+          20
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 23,
+        "title": "Local Database Implementation and Analytics",
+        "description": "Implement IndexedDB (via Dexie.js) for local storage of learning analytics, event tracking, and knowledge gap analysis.",
+        "details": "Set up Dexie.js schema for quiz results, chat queries, flashcards, and topic metadata. Implement event logging and local analytics processing to identify weak concepts. Ensure privacy and offline functionality.",
+        "testStrategy": "Simulate user activity and verify data is stored, retrieved, and analyzed locally. Test gap analysis accuracy and dashboard data population. Validate offline access.",
+        "priority": "high",
+        "dependencies": [
+          21
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 24,
+        "title": "Personalized Dashboard and Revision Plan Generation",
+        "description": "Build a dashboard UI to display learning statistics, knowledge gaps, and generate personalized revision plans based on local analytics.",
+        "details": "Design React dashboard to read from IndexedDB. Visualize quiz performance, chat topics, and weak areas. Implement logic to suggest revision plans and direct users to relevant PDF sections.",
+        "testStrategy": "Populate database with sample data and verify dashboard displays correct analytics. Test revision plan generation and navigation to PDF sections.",
+        "priority": "medium",
+        "dependencies": [
+          23
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 25,
+        "title": "Optional Cloud Sync and Clipboard Multimodal Paste",
+        "description": "Implement opt-in cloud sync (Firestore) for backup/sync, and multimodal clipboard paste in chat sidebar with privacy controls.",
+        "details": "Add UI for cloud sync opt-in and authentication (Firebase). Sync IndexedDB data to Firestore securely. Integrate clipboard paste button in chat sidebar; handle text/image input, send images to Gemini for analysis, and enforce privacy (no default persistence). Provide error handling and offline fallback.",
+        "testStrategy": "Enable cloud sync and verify data synchronization. Test clipboard paste for text and images, validate Gemini analysis, and check privacy controls. Simulate offline scenarios and confirm graceful degradation.",
+        "priority": "medium",
+        "dependencies": [
+          24,
+          20
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 26,
+        "title": "Implement Multimodal Clipboard Paste in Chat Sidebar",
+        "description": "Add a 'Paste from Clipboard' button to the chat sidebar that supports pasting images (PNG/JPEG) and text, handling permissions, privacy, and offline gracefully, and integrates with ChatSidebarService and GeminiAIService.",
+        "details": "1. UI: Add a 'Paste from Clipboard' button to the chat sidebar. On click, use the Clipboard API to read clipboard contents. If the clipboard contains an image (PNG/JPEG), display a preview chip in the sidebar and prepare the image as inlineData for the next Gemini multimodal message. If the clipboard contains text, treat it as selected context for chat. \n2. Permissions: Use the asynchronous Clipboard API without requesting persistent permissions; prompt only on user gesture. If clipboard access fails (e.g., due to browser restrictions), fall back to listening for Ctrl/Cmd+V paste events in the chat input. \n3. Error Handling: Show clear, user-friendly messages for permission denials, unsupported formats, or offline status. Ensure all error states are handled gracefully and consistently with the extension's error feedback system. \n4. Privacy: Do not persist pasted images by default; images should be held in memory only for the current chat session unless the user explicitly saves them. \n5. Offline Handling: Detect offline state and disable the paste button or show appropriate messaging. \n6. Service Integration: Extend ChatSidebarService to handle multimodal paste events and wire through to GeminiAIService with a new API method that accepts both text and optional image parts. Ensure the API method can handle both modalities and passes them to Gemini as required. \n7. Unit Tests: Implement unit tests for clipboard handlers (including fallback logic), service entry points, and error handling. Mock clipboard and network conditions to verify all branches. \n8. Documentation: Document the permissions strategy, privacy considerations, and user-facing behaviors for future maintainers.",
+        "testStrategy": "- Simulate user clicking the paste button with various clipboard contents (text, PNG, JPEG, unsupported types) and verify correct preview, context handling, and error messages.\n- Test fallback to Ctrl/Cmd+V paste event when Clipboard API is unavailable or denied.\n- Verify that pasted images are not persisted beyond the session unless explicitly saved.\n- Test offline mode: ensure button disables or shows offline messaging, and no clipboard access is attempted.\n- Write unit tests for ChatSidebarService and GeminiAIService entry points, including multimodal API method.\n- Test error handling for permission denial, unsupported formats, and network failures.\n- Confirm all user-facing messages are clear and consistent with extension standards.",
+        "status": "done",
+        "dependencies": [
+          5,
+          6,
+          14
+        ],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Add 'Paste from Clipboard' Button to Chat Sidebar UI",
+            "description": "Implement a visible and accessible 'Paste from Clipboard' button in the chat sidebar UI, ensuring it matches the design system and is placed for intuitive user access.",
+            "dependencies": [],
+            "details": "Create a new button component in the chat sidebar. Ensure it is styled according to the sidebar's design guidelines. Add an onClick handler that will trigger clipboard reading logic. The button should be disabled when offline (handled in later subtasks).",
+            "status": "done",
+            "testStrategy": "Verify button renders correctly, is clickable, and is disabled when offline."
+          },
+          {
+            "id": 2,
+            "title": "Implement Clipboard Read Logic for Text and Images",
+            "description": "Use the asynchronous Clipboard API to read clipboard contents on button click, supporting both text and image (PNG/JPEG) formats, and fallback to paste event if access fails.",
+            "dependencies": [
+              "26.1"
+            ],
+            "details": "On button click, use navigator.clipboard.read() to access clipboard data. Check for image (PNG/JPEG) and text types. If Clipboard API access fails (e.g., permission denied), listen for Ctrl/Cmd+V paste events in the chat input as a fallback. Ensure all clipboard reads are triggered by user gesture.",
+            "status": "done",
+            "testStrategy": "Simulate clipboard contents with text, PNG, JPEG, and unsupported formats. Test fallback by denying Clipboard API access."
+          },
+          {
+            "id": 3,
+            "title": "Display Preview Chip for Pasted Images and Context for Text",
+            "description": "Show a preview chip in the sidebar for pasted images and treat pasted text as selected chat context, allowing users to remove or confirm before sending.",
+            "dependencies": [
+              "26.2"
+            ],
+            "details": "For images, render a preview chip with a thumbnail and a remove button. Store the image as a Blob in memory for the current session. For text, display it as selected context in the chat input area. Provide UI controls to clear or confirm the pasted content.",
+            "status": "done",
+            "testStrategy": "Paste images and text, verify correct preview and context display, and test remove/clear actions."
+          },
+          {
+            "id": 4,
+            "title": "Handle Permissions, Error States, and Offline Scenarios",
+            "description": "Implement robust error handling for permission denials, unsupported formats, and offline status, providing clear user feedback consistent with the extension's error system.",
+            "dependencies": [
+              "26.2",
+              "26.3"
+            ],
+            "details": "Detect and handle errors from clipboard access (e.g., permission denied, unsupported format). Show user-friendly error messages using the extension's feedback system. Monitor network status to disable the paste button or show offline messaging. Ensure all error states are handled gracefully.",
+            "status": "done",
+            "testStrategy": "Simulate permission denial, unsupported clipboard formats, and offline state. Verify correct error messages and UI responses."
+          },
+          {
+            "id": 5,
+            "title": "Enforce Privacy for Pasted Images and Text",
+            "description": "Ensure pasted images are held only in memory for the current chat session and not persisted unless explicitly saved by the user. Apply privacy rules to text context as well.",
+            "dependencies": [
+              "26.3",
+              "26.4"
+            ],
+            "details": "Store pasted images as Blobs in session memory. Do not write images to disk or persistent storage unless the user chooses to save. For text, ensure it is only used as chat context and not logged or persisted beyond session scope. Document privacy handling in code comments.",
+            "status": "done",
+            "testStrategy": "Verify images are not persisted after session ends unless saved. Confirm text context is not stored beyond session."
+          },
+          {
+            "id": 6,
+            "title": "Integrate Clipboard Paste with ChatSidebarService and GeminiAIService",
+            "description": "Extend ChatSidebarService to handle multimodal paste events and wire through to GeminiAIService with a new API method that accepts both text and optional image parts.",
+            "dependencies": [
+              "26.3",
+              "26.5"
+            ],
+            "details": "Add a method sendMessageWithClipboard({text?, imageBlob?}) to ChatSidebarService. Ensure it packages text and image (as inlineData base64 for images) and passes them to GeminiAIService. Update GeminiAIService to accept and process multimodal requests, handling both modalities as required.",
+            "status": "done",
+            "testStrategy": "Unit test service methods with various combinations of text and image. Mock GeminiAIService and verify correct API calls."
+          },
+          {
+            "id": 7,
+            "title": "Implement Unit Tests for Clipboard Handlers, Services, and Error Handling",
+            "description": "Write comprehensive unit tests for clipboard reading logic, fallback mechanisms, service integration, privacy enforcement, and error handling, using mocks for clipboard and network conditions.",
+            "dependencies": [
+              "26.2",
+              "26.3",
+              "26.4",
+              "26.5",
+              "26.6"
+            ],
+            "details": "Create test cases for: reading clipboard (text/image), fallback to paste event, preview chip rendering, error scenarios, offline handling, privacy rules, and service API integration. Use fake clipboard and blob mocks. Ensure all branches and edge cases are covered.",
+            "status": "done",
+            "testStrategy": "Run automated tests simulating all clipboard and network conditions. Verify correct UI, service, and privacy behaviors."
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-08-15T20:39:13.643Z",
-      "updated": "2025-08-17T01:30:00.414Z",
+      "updated": "2025-08-17T18:25:36.639Z",
       "description": "Tasks for master context"
     }
   }
