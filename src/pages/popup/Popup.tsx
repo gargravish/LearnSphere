@@ -12,6 +12,14 @@ const Popup: React.FC = () => {
 
   useEffect(() => {
     loadSettings();
+    const listener = (changes: any, areaName: string) => {
+      if (areaName !== 'sync') return;
+      if (changes['learnsphere_settings']) {
+        loadSettings();
+      }
+    };
+    try { chrome.storage.onChanged.addListener(listener); } catch {}
+    return () => { try { chrome.storage.onChanged.removeListener(listener); } catch {} };
   }, []);
 
   const loadSettings = async () => {

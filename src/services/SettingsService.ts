@@ -9,6 +9,9 @@ export interface ExtensionSettings {
   language: string;
   maxTokens: number;
   temperature: number;
+  // Thinking controls
+  enableThinking?: boolean;
+  thinkingBudgetTokens?: number;
   // New settings for enhanced configuration
   autoOpenChat: boolean;
   highlightColors: string[];
@@ -38,6 +41,18 @@ export class SettingsService {
     this.settings = this.getDefaultSettings();
     this.loadSettings();
     this.setupSystemThemeListener();
+    // Listen for external storage changes (e.g., popup saves) and sync in-memory state
+    try {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'sync') return;
+        const changed = changes[this.storageKey];
+        if (changed && changed.newValue) {
+          this.settings = { ...this.settings, ...changed.newValue };
+          this.applySettingsToPage();
+          this.notifyListeners();
+        }
+      });
+    } catch {}
   }
 
   /**
@@ -220,8 +235,10 @@ export class SettingsService {
       autoSaveHighlights: true,
       enableNotifications: true,
       language: 'en',
-      maxTokens: 2048,
+      maxTokens: 8192,
       temperature: 0.7,
+      enableThinking: false,
+      thinkingBudgetTokens: 0,
       // New default settings
       autoOpenChat: false,
       highlightColors: ['#ffeb3b', '#4caf50', '#2196f3', '#f44336', '#9c27b0'],

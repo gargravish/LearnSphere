@@ -19,6 +19,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
   useEffect(() => {
     loadDataUsage();
     loadSettingsSummary();
+    // Keep this view in sync if popup or other pages update settings
+    const listener = (changes: any, areaName: string) => {
+      if (areaName !== 'sync') return;
+      if (changes['learnsphere_settings']) {
+        settingsService.reloadSettings().then(() => setSettings(settingsService.getAll()));
+      }
+    };
+    try { chrome.storage.onChanged.addListener(listener); } catch {}
+    return () => { try { chrome.storage.onChanged.removeListener(listener); } catch {} };
   }, []);
 
   const loadDataUsage = async () => {
@@ -313,16 +322,41 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
       </div>
 
       <div className="setting-group">
-        <label>Max Tokens</label>
+        <label>Max Output Tokens</label>
         <input
           type="number"
-          value={settings.maxTokens}
-          onChange={(e) => handleSettingChange('maxTokens', parseInt(e.target.value))}
-          min="100"
-          max="8192"
-          step="100"
+          value={settings.maxTokens || 8192}
+          onChange={(e) => handleSettingChange('maxTokens' as any, parseInt(e.target.value))}
+          min={256}
+          max={8192}
+          step={128}
         />
-        <p className="setting-description">Maximum tokens for AI responses (100-8192)</p>
+        <p className="setting-description">Upper limit for response length (may be capped by model).</p>
+      </div>
+
+      <div className="setting-group">
+        <label>
+          <input
+            type="checkbox"
+            checked={!!settings.enableThinking}
+            onChange={(e) => handleSettingChange('enableThinking' as any, e.target.checked)}
+          />
+          Enable Thinking (2.5 models)
+        </label>
+        <p className="setting-description">For complex reasoning; can increase latency and cost.</p>
+        {settings.enableThinking ? (
+          <div style={{ marginTop: 8 }}>
+            <label>Thinking Budget Tokens</label>
+            <input
+              type="number"
+              value={settings.thinkingBudgetTokens ?? 0}
+              onChange={(e) => handleSettingChange('thinkingBudgetTokens' as any, parseInt(e.target.value || '0'))}
+              min={-1}
+              max={32768}
+              step={128}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="setting-group">
@@ -346,6 +380,41 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onClose }) => {
       >
         Reset AI Settings
       </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button
+          className="reset-button"
+          onClick={async () => {
+            setIsLoading(true);
+            try {
+              await settingsService.update(settings);
+              setMessage('Settings saved');
+              setTimeout(() => setMessage(''), 3000);
+            } finally {
+              setIsLoading(false);
+            }
+          }}
+          disabled={isLoading}
+        >
+          Save Settings
+        </button>
+        <button
+          className="reset-button"
+          onClick={async () => {
+            setIsLoading(true);
+            try {
+              await settingsService.reloadSettings();
+              setSettings(settingsService.getAll());
+              setMessage('Settings reloaded');
+              setTimeout(() => setMessage(''), 3000);
+            } finally {
+              setIsLoading(false);
+            }
+          }}
+          disabled={isLoading}
+        >
+          Reload
+        </button>
+      </div>
     </div>
   );
 

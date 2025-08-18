@@ -6,6 +6,14 @@ import { ContentExtractionService } from '@/services/ContentExtractionService';
 // Minimal Gemini integration (no external imports)
 let geminiApiKey: string | null = null;
 let GEMINI_MODEL = 'gemini-2.5-flash';
+let GEMINI_MAX_TOKENS = 8192;
+// Streaming removed for stability; always use non-streaming API
+let GEMINI_ENABLE_THINKING = false;
+let GEMINI_THINKING_BUDGET = 0;
+// Lightweight conversation memory for the last turn
+let LAST_TURN_USER: { role: 'user'; parts: any[] } | null = null;
+let LAST_TURN_MODEL: string | null = null;
+let LAST_TURN_HAD_IMAGE = false;
 
 async function loadGeminiKey(): Promise<string | null> {
   try {
@@ -19,6 +27,11 @@ async function loadGeminiKey(): Promise<string | null> {
         if (result.learnsphere_settings.geminiModel) {
           GEMINI_MODEL = result.learnsphere_settings.geminiModel;
         }
+        if (typeof result.learnsphere_settings.maxTokens === 'number') {
+          GEMINI_MAX_TOKENS = Math.max(256, Math.min(8192, Number(result.learnsphere_settings.maxTokens)));
+        }
+        if (typeof result.learnsphere_settings.enableThinking === 'boolean') GEMINI_ENABLE_THINKING = !!result.learnsphere_settings.enableThinking;
+        if (typeof result.learnsphere_settings.thinkingBudgetTokens === 'number') GEMINI_THINKING_BUDGET = Math.max(0, Number(result.learnsphere_settings.thinkingBudgetTokens));
       }
     } catch {}
     if (!key) {
@@ -30,11 +43,13 @@ async function loadGeminiKey(): Promise<string | null> {
           if (local.learnsphere_settings.geminiModel) {
             GEMINI_MODEL = local.learnsphere_settings.geminiModel;
           }
+          if (typeof local.learnsphere_settings.maxTokens === 'number') {
+            GEMINI_MAX_TOKENS = Math.max(256, Math.min(8192, Number(local.learnsphere_settings.maxTokens)));
+          }
+          if (typeof local.learnsphere_settings.enableThinking === 'boolean') GEMINI_ENABLE_THINKING = !!local.learnsphere_settings.enableThinking;
+          if (typeof local.learnsphere_settings.thinkingBudgetTokens === 'number') GEMINI_THINKING_BUDGET = Math.max(0, Number(local.learnsphere_settings.thinkingBudgetTokens));
         }
       } catch {}
-    }
-    if (!key && typeof localStorage !== 'undefined') {
-      key = localStorage.getItem('learnsphere_gemini_api_key');
     }
     geminiApiKey = key;
     return key;
@@ -46,26 +61,40 @@ async function loadGeminiKey(): Promise<string | null> {
 
 function sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 
-async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxOutputTokens?: number }): Promise<string> {
+function isLikelyFollowUp(s: string): boolean {
+  const t = s.toLowerCase();
+  return /(answer|solution|correct|wrong|explain|explanation|should|instead|provided|given)/.test(t);
+}
+
+async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxOutputTokens?: number; history?: any[] }): Promise<string> {
   const key = geminiApiKey || (await loadGeminiKey());
   if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  // Choose streaming or unary endpoint based on settings
+  const base = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`;
+  const url = `${base}:generateContent?key=${key}`;
   let attempt = 0;
   let lastError: any = null;
   const maxAttempts = 3;
-  const maxOutputTokens = Math.max(256, Math.min(4096, Number(opts?.maxOutputTokens ?? 2048)));
+  const maxOutputTokens = Math.max(256, Math.min(GEMINI_MAX_TOKENS, Number(opts?.maxOutputTokens ?? GEMINI_MAX_TOKENS)));
   while (attempt < maxAttempts) {
     try {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         throw new Error('You appear to be offline. Please check your internet connection.');
       }
+      const thinkingConfig = (() => {
+        const model = (GEMINI_MODEL || '').toLowerCase();
+        const isFlash = model.includes('flash');
+        if (GEMINI_ENABLE_THINKING) return { thinkingBudget: (GEMINI_THINKING_BUDGET ?? -1) };
+        if (isFlash) return { thinkingBudget: 0 };
+        return undefined;
+      })();
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }]}],
-          generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens }
+          contents: [ ...(opts?.history || []), { role: 'user', parts: [{ text: prompt }]}],
+          generationConfig: { temperature: 0.2, topK: 20, topP: 0.8, maxOutputTokens, responseMimeType: 'text/plain', ...(thinkingConfig ? { thinkingConfig } : {}) },
+          tools: [], safetySettings: []
         })
       });
       if (!res.ok) {
@@ -76,6 +105,7 @@ async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxO
       }
       const data = await res.json();
       let text = extractGeminiText(data) || '';
+      // Fallback removed since we no longer stream
       const finish = String(data?.candidates?.[0]?.finishReason || '').toUpperCase();
       // If truncated by token limit and allowed, try one continuation call
       if (text && opts?.allowContinue && finish.includes('TOKEN')) {
@@ -83,7 +113,7 @@ async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxO
         const res2 = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: continuationPrompt }]}], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
+          body: JSON.stringify({ contents: [ ...(opts?.history || []), { role: 'user', parts: [{ text: continuationPrompt }]}], generationConfig: { temperature: 0.2, topK: 20, topP: 0.8, maxOutputTokens, responseMimeType: 'text/plain', ...(thinkingConfig ? { thinkingConfig } : {}) }, tools: [], safetySettings: [] })
         });
         if (res2.ok) {
           const data2 = await res2.json();
@@ -106,8 +136,40 @@ async function callGemini(prompt: string, opts?: { allowContinue?: boolean; maxO
   throw lastError || new Error('Unknown error while calling Gemini');
 }
 
+// Basic SSE stream reader for streamGenerateContent. Converts streamed chunks into a final response-like object.
+async function readSSEToResponseObject(res: Response, onStream?: (delta: string) => void): Promise<any> {
+  if (!res.body) return await res.json();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  let partsText: string[] = [];
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      const chunks = buf.split('\n\n');
+      buf = chunks.pop() || '';
+      for (const chunk of chunks) {
+        if (chunk.startsWith('data:')) {
+          const jsonStr = chunk.replace(/^data:\s*/, '');
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(jsonStr);
+            const delta = extractGeminiText(evt) || '';
+            if (delta) partsText.push(delta);
+            if (delta && onStream) try { onStream(delta); } catch {}
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  try { console.log('LearnSphere[debug]: stream aggregated chars', partsText.join('').length); } catch {}
+  return { candidates: [{ content: { parts: [{ text: partsText.join('') }] }, finishReason: 'STOP' }] };
+}
+
 // Multimodal Gemini call with optional image/text parts
-async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; pastedText?: string; allowContinue?: boolean; maxOutputTokens?: number }): Promise<string> {
+async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; pastedText?: string; allowContinue?: boolean; maxOutputTokens?: number; history?: any[] }): Promise<string> {
   const key = geminiApiKey || (await loadGeminiKey());
   if (!key) throw new Error('Gemini API key not configured. Open the extension popup and set the API key.');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
@@ -133,27 +195,62 @@ async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; p
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new Error('You appear to be offline. Please check your internet connection.');
   }
-  const maxOutputTokens = Math.max(256, Math.min(4096, Number(opts?.maxOutputTokens ?? 2048)));
-  const res = await fetch(url, {
+  const maxOutputTokens = Math.max(256, Math.min(GEMINI_MAX_TOKENS, Number(opts?.maxOutputTokens ?? GEMINI_MAX_TOKENS)));
+  // If we want streaming later, switch to stream endpoint and parse SSE chunks.
+  const base = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`;
+  const url2 = `${base}:generateContent?key=${key}`;
+  const thinkingConfig = (() => {
+    const model = (GEMINI_MODEL || '').toLowerCase();
+    const isFlash = model.includes('flash');
+    if (GEMINI_ENABLE_THINKING) return { thinkingBudget: (GEMINI_THINKING_BUDGET ?? -1) };
+    if (isFlash) return { thinkingBudget: 0 };
+    return undefined;
+  })();
+  const res = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
+    body: JSON.stringify({ contents: [ ...(opts?.history || []), { role: 'user', parts }], generationConfig: { temperature: 0.2, topK: 24, topP: 0.9, maxOutputTokens, responseMimeType: 'text/plain', ...(thinkingConfig ? { thinkingConfig } : {}) }, tools: [], safetySettings: [] })
   });
   if (!res.ok) {
     const errText = await res.text();
     console.error('Gemini multimodal error', res.status, res.statusText, errText);
     throw new Error(`Gemini error ${res.status}: ${res.statusText} — ${errText}`);
   }
-  const data = await res.json();
+  let data = await res.json();
+  // Fallback for text selection when streaming returns no content
+  if (!extractGeminiText(data)) {
+    try {
+      const r2 = await fetch(url2, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [ ...(opts?.history || []), { role: 'user', parts }], generationConfig: { temperature: 0.2, topK: 24, topP: 0.9, maxOutputTokens, responseMimeType: 'text/plain', ...(thinkingConfig ? { thinkingConfig } : {}) }, tools: [], safetySettings: [] }) });
+      if (r2.ok) data = await r2.json();
+    } catch {}
+  }
+  try {
+    const usage = data?.usageMetadata;
+    const promptCount = usage?.promptTokenCount ?? usage?.promptTokensCount;
+    const outputCount = usage?.candidatesTokenCount ?? usage?.candidatesTokensCount;
+    const total = usage?.totalTokenCount ?? usage?.totalTokensCount;
+    console.log('LearnSphere[debug]: primary finishReason', data?.candidates?.[0]?.finishReason,
+      'candidates', (data?.candidates || []).length,
+      'promptTokenCount', promptCount,
+      'candidatesTokenCount', outputCount,
+      'totalTokenCount', total,
+      'promptTokensDetails', usage?.promptTokensDetails,
+      'thoughtTokensCount', usage?.thoughtTokensCount,
+      'promptFeedback', data?.promptFeedback);
+  } catch {}
   let text = extractGeminiText(data) || '';
   const finish = String(data?.candidates?.[0]?.finishReason || '').toUpperCase();
   if (text && opts?.allowContinue && finish.includes('TOKEN')) {
     const cont = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: `Continue the previous answer without repeating.\n\nOriginal task:\n${prompt}\n\nPartial answer so far:\n${text.slice(0, 4000)}` }]}], generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens } })
+      body: JSON.stringify({ contents: [ ...(opts?.history || []), { role: 'user', parts: [{ text: `Continue the previous answer without repeating.\n\nOriginal task:\n${prompt}\n\nPartial answer so far:\n${text.slice(0, 4000)}` }]}], generationConfig: { temperature: 0.2, topK: 20, topP: 0.8, maxOutputTokens, ...(thinkingConfig ? { thinkingConfig } : {}) } })
     });
     if (cont.ok) {
       const data2 = await cont.json();
+      try {
+        const usage2 = data2?.usageMetadata;
+        console.log('LearnSphere[debug]: continuation finishReason', data2?.candidates?.[0]?.finishReason, 'candidates', (data2?.candidates || []).length, 'usage', usage2);
+      } catch {}
       const extra = extractGeminiText(data2);
       if (extra) text += (text.endsWith('\n') ? '' : '\n') + extra;
     }
@@ -168,17 +265,18 @@ async function callGeminiMultimodal(prompt: string, opts?: { imageBlob?: Blob; p
     const uploadedUri2 = await uploadGeminiFile(norm2, 'viewer-clipboard.jpg', key);
     if (uploadedUri2) {
       parts2.push({ fileData: { mimeType: mime, fileUri: uploadedUri2 } });
-    } else {
+      } else {
       const base64 = await blobToBase64(norm2);
       parts2.push({ inlineData: { mimeType: mime, data: base64 } });
     }
     parts2.push({ text: strongPrompt });
     const res2 = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: parts2 }], generationConfig: { temperature: 0.2, topK: 20, topP: 0.8, maxOutputTokens } })
+      body: JSON.stringify({ contents: [ ...(opts?.history || []), { role: 'user', parts: parts2 }], generationConfig: { temperature: 0.2, topK: 24, topP: 0.9, maxOutputTokens, responseMimeType: 'text/plain', ...(thinkingConfig ? { thinkingConfig } : {}) }, tools: [], safetySettings: [] })
     });
     if (res2.ok) {
       const data2 = await res2.json();
+      try { console.log('LearnSphere[debug]: retry finishReason', data2?.candidates?.[0]?.finishReason, 'candidates', (data2?.candidates || []).length, 'promptFeedback', data2?.promptFeedback); } catch {}
       const text2 = extractGeminiText(data2);
       if (text2) return text2;
     }
@@ -210,12 +308,17 @@ async function uploadGeminiFile(blob: Blob, filename: string, apiKey: string): P
     const res = await fetch(url, { method: 'POST', body: form });
     if (!res.ok) return null;
     const json = await res.json();
-    const name = json?.name as string | undefined;
-    if (!name) return null;
-    // Optionally poll brief for ACTIVE
-    const metaUrl = `https://generativelanguage.googleapis.com/v1beta/${name}?key=${apiKey}`;
+    // Simple upload may return { file: {...} } or a flattened File object
+    const fileObj: any = (json && (json.file || json)) || {};
+    const name: string | undefined = fileObj.name;
+    const uri: string | undefined = fileObj.uri;
+    if (!name && !uri) return null;
+    const metaName = name || (typeof uri === 'string' && uri.split('/files/').pop() ? `files/${uri.split('/files/').pop()}` : undefined);
+    // Optionally poll briefly for ACTIVE
+    const metaUrl = metaName ? `https://generativelanguage.googleapis.com/v1beta/${metaName}?key=${apiKey}` : undefined;
     for (let i = 0; i < 5; i++) {
       try {
+        if (!metaUrl) break;
         const m = await fetch(metaUrl);
         if (m.ok) {
           const mj = await m.json();
@@ -224,7 +327,8 @@ async function uploadGeminiFile(blob: Blob, filename: string, apiKey: string): P
       } catch {}
       await sleep(150);
     }
-    return name;
+    // Prefer returning the uri
+    return uri || (fileObj.file?.uri) || null;
   } catch {
     return null;
   }
@@ -663,8 +767,8 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
             if (types.includes('text/plain')) { const blob = await item.getType('text/plain'); const text = await blob.text(); setPastedText(text); return; }
           }
           showErrorChip('Clipboard does not contain supported image or text.');
-          return;
-        }
+      return;
+    }
       } catch (err) {
         console.warn('Clipboard read failed, fallback to readText/paste', err);
         try {
@@ -729,10 +833,23 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
     send.textContent = 'Send';
     send.addEventListener('click', async () => {
       const text = ta.value.trim();
-      if (!text) return;
+      const hasImage = !!pendingPastedImage;
+      const hasText = !!text;
+      const hasPastedText = !!pendingPastedText && pendingPastedText.trim().length > 0;
+      if (!hasImage && !hasText && !hasPastedText) return;
       const userMsg = document.createElement('div');
       userMsg.className = 'ls-message user';
-      userMsg.innerHTML = markdownToHtml(text);
+      let userHtml = hasText ? markdownToHtml(text) : '';
+      if (hasImage) {
+        try {
+          const imgUrl = URL.createObjectURL(pendingPastedImage as Blob);
+          const clickable = `<div style="margin-top:6px"><a href="${imgUrl}" target="_blank" rel="noopener" style="text-decoration:underline;color:#1d4ed8">View attached image</a></div>`;
+          const thumb = `<div style="margin-top:6px"><a href="${imgUrl}" target="_blank" rel="noopener"><img src="${imgUrl}" alt="attachment" style="max-width:160px;border-radius:8px;border:1px solid #d1d5db" /></a></div>`;
+          userHtml += thumb + clickable;
+        } catch {}
+      }
+      if (!userHtml) userHtml = '<em>(no text)</em>';
+      userMsg.innerHTML = userHtml;
       history.appendChild(userMsg);
 
       ta.value = '';
@@ -754,7 +871,8 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
           }
         } catch {}
         const imageFirst = !!pendingPastedImage;
-        // Prefer explicit selection passed when opening the sidebar for this turn; fall back to fresh selection
+        // STRICT turn isolation: ignore any previous chat history and stale selection when an image is attached.
+        // Only current textarea text, current image, and optional fresh selection (text-only turn) are sent.
         const effectiveSelection = selection && selection.trim() ? selection : freshSelection;
         const context = imageFirst ? '' : (effectiveSelection ? `\n\nContext (selected):\n${effectiveSelection}` : '');
         // Auto-create an anchor only if no image is attached (turn should respect latest modality)
@@ -784,19 +902,51 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         if (pendingPastedImage || pendingPastedText) {
           // Image-focused guidance when an image is present
           const imageGuidance = pendingPastedImage
-            ? '\n\nYou are given a screenshot image that contains the question. Carefully read the text in the image (perform OCR if needed) and solve the exact question shown. Ignore unrelated page text. If any diagram/tables are present, interpret them. Show the final answer clearly.'
+            ? '\n\nYou are given a single screenshot image that contains ONE question. Solve ONLY this image question. Do not consider any previous messages or other questions. Perform OCR if needed. Answer clearly.'
             : '';
           // Keep preview visible until we have the answer; clear only after rendering
+          const followHistory = (LAST_TURN_USER && isLikelyFollowUp(text)) ? [ LAST_TURN_USER, { role: 'model', parts: [{ text: LAST_TURN_MODEL || '' }] } ] : [];
+          // Build current user content parts so we can persist the exact turn
+          const currentParts: any[] = [];
+          if (pendingPastedImage) {
+            const norm = await normalizeImageBlob(pendingPastedImage);
+            const mime = norm.type || 'image/png';
+            const uploadedUri = await uploadGeminiFile(norm, 'viewer-clipboard.jpg', await loadGeminiKey() as string);
+            if (uploadedUri) currentParts.push({ fileData: { mimeType: mime, fileUri: uploadedUri } });
+            else { const base64 = await blobToBase64(norm); currentParts.push({ inlineData: { mimeType: mime, data: base64 } }); }
+          }
+          if (pendingPastedText && pendingPastedText.trim()) currentParts.push({ text: pendingPastedText.trim() });
+          currentParts.push({ text: `${guidelines}${imageGuidance}\n\nQuestion: ${text || 'Solve the problem shown in the image.'}` });
           answer = await callGeminiMultimodal(`${guidelines}${imageGuidance}\n\nQuestion: ${text || 'Solve the problem shown in the image.'}${context}${imageFirst ? '' : anchorSnippet}`,
-            { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined, allowContinue: true, maxOutputTokens: 2048 });
+            { imageBlob: pendingPastedImage || undefined, pastedText: pendingPastedText || undefined, allowContinue: true, maxOutputTokens: GEMINI_MAX_TOKENS, history: followHistory });
+          // Update last turn memory
+          LAST_TURN_USER = { role: 'user', parts: currentParts };
+          LAST_TURN_MODEL = answer || '';
+          LAST_TURN_HAD_IMAGE = true;
         } else {
-          answer = await callGemini(`${guidelines}\n\nQuestion: ${text}${context}${anchorSnippet}`, { allowContinue: true, maxOutputTokens: 2048 });
+          const followUpOnImage = (LAST_TURN_USER && LAST_TURN_HAD_IMAGE && isLikelyFollowUp(text));
+          const followHistory = followUpOnImage ? [ LAST_TURN_USER, { role: 'model', parts: [{ text: LAST_TURN_MODEL || '' }] } ] : [];
+          // Suppress stale selection context if this is a follow-up to an image turn
+          const safeContext = followUpOnImage ? '' : context;
+          answer = await callGemini(`${guidelines}\n\nQuestion: ${text || (selection || '').slice(0, 2000)}${safeContext}${anchorSnippet}`, {
+            allowContinue: true,
+            maxOutputTokens: GEMINI_MAX_TOKENS,
+            history: followHistory
+          });
+          // Update last turn memory with text-only parts
+          LAST_TURN_USER = { role: 'user', parts: [{ text: text || (selection || '') }] };
+          LAST_TURN_MODEL = answer || '';
+          LAST_TURN_HAD_IMAGE = false;
         }
         thinking.innerHTML = markdownToHtml(answer);
-        // Jump-to-context removed for now
-        try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
-        // Clear preview after rendering the answer to avoid flicker/disappearing before reply
-        pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = '';
+         // Jump-to-context removed for now
+         try { await StorageService.logChatAsked(text.slice(0, 80), { sourceUrl: location.href, documentTitle: document.title }); } catch {}
+         // Clear preview chip after rendering; history keeps an immutable copy above
+         pendingPastedImage = null; pendingPastedText = null; preview.innerHTML = '';
+        // Update lightweight memory for potential follow-ups
+        LAST_TURN_USER = { role: 'user', parts: [{ text: text || selection || '' }] };
+        LAST_TURN_MODEL = answer || '';
+        LAST_TURN_HAD_IMAGE = false;
       } catch (e) {
         const msg = (e as Error).message || 'Unknown error';
         thinking.innerHTML = markdownToHtml(`**Error:** ${msg}\n\nTry again in a few seconds. If the issue persists, verify your network and API key in Settings.`);
@@ -868,7 +1018,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
         const base = selection || window.getSelection()?.toString() || document.title;
         const prompt = `Summarize the following text using Markdown. Include a short title, key bullet points, and a brief takeaway section.\n\n${base}`;
         out.innerHTML = `<span class="ls-spinner"></span>Generating…`;
-        const ans = await callGemini(prompt);
+        const ans = await callGemini(prompt, { });
         out.innerHTML = markdownToHtml(ans);
         try { await StorageService.logSummaryGenerated({ sourceUrl: location.href, documentTitle: document.title }); } catch {}
       } catch (e) {
@@ -909,7 +1059,7 @@ function createSidebar(type: 'chat' | 'summary' | 'quiz', selection?: string): v
 {"question": string, "options": [string,string,string,string], "correctAnswer": number (0-3), "explanation": string} 
 based on this text: \n${base}`;
         out.innerHTML = `<span class="ls-spinner"></span>Generating…`;
-        const raw = await callGemini(prompt);
+        const raw = await callGemini(prompt, { });
         const questions = tryParseQuizJSON(raw);
         if (!questions || !questions.length) {
           out.innerHTML = markdownToHtml('**Sorry**: Could not parse quiz data. Please try again.');
